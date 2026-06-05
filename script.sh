@@ -701,6 +701,68 @@ EOF
     fi
 }
 
+sincronizar_public_html_painel_web() {
+    local user="${1:-$WEB_PANEL_USER}"
+    local root_dir="${2:-${SITES_ROOT}/${user}}"
+    local public_html="${root_dir}/public_html"
+
+    if [[ ! -d "${WEB_PANEL_INSTALL_DIR}/public" || ! -f "${WEB_PANEL_INSTALL_DIR}/public/index.php" ]]; then
+        erro "Arquivos instalados do painel web nao encontrados em ${WEB_PANEL_INSTALL_DIR}/public."
+        return 1
+    fi
+    if ! usuario_valido "$user"; then
+        erro "Usuario invalido para sincronizar painel web: ${user}"
+        return 1
+    fi
+    if [[ -e "$public_html" && ! -d "$public_html" && ! -L "$public_html" ]]; then
+        erro "Caminho invalido: ${public_html}"
+        return 1
+    fi
+
+    if [[ -L "$public_html" ]]; then
+        rm -f "$public_html"
+    fi
+    if [[ ! -d "$public_html" ]]; then
+        mkdir -p "$public_html"
+    fi
+
+    find "$public_html" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "${WEB_PANEL_INSTALL_DIR}/public/." "$public_html/"
+    chown -R "${user}:${user}" "$public_html"
+    chmod -R u+rwX,go+rX "$public_html"
+}
+
+atualizar_painel_web_instalado() {
+    titulo
+
+    local user="$WEB_PANEL_USER"
+    local root_dir="${SITES_ROOT}/${user}"
+    local dominio_atual=""
+
+    msg "Atualizando arquivos internos do painel web..."
+    instalar_arquivos_painel_web || return
+    garantir_comando_php_cli >/dev/null 2>&1 || true
+
+    if [[ -d "$root_dir" && -d "${VHOSTS_DIR}/${user}" ]]; then
+        msg "Sincronizando public_html publicado do painel..."
+        sincronizar_public_html_painel_web "$user" "$root_dir" || return
+        dominio_atual="$(api_dominio_por_usuario "$user" || true)"
+        systemctl restart lsws >/dev/null 2>&1 || true
+
+        msg "Painel web atualizado com sucesso."
+        if [[ -n "$dominio_atual" ]]; then
+            echo "Dominio atual: https://${dominio_atual}"
+        fi
+        echo "Arquivos publicados: ${root_dir}/public_html"
+        echo "Helper atualizado em: ${WEB_PANEL_HELPER_BIN}"
+        echo "Script API atualizado em: ${WEB_PANEL_API_SCRIPT}"
+    else
+        aviso "Painel web ainda nao esta publicado em dominio proprio."
+        echo "Os arquivos base foram atualizados em ${WEB_PANEL_INSTALL_DIR}."
+        echo "Depois use a opcao 20 para publicar/configurar o dominio do painel."
+    fi
+}
+
 configurar_painel_web_dominio_principal() {
     titulo
 
@@ -4130,6 +4192,7 @@ acao_setup_mostrar_status() { mostrar_status; }
 acao_setup_reiniciar_servicos() { reiniciar_servicos; }
 acao_setup_definir_senha_ols() { definir_senha_admin_ols; }
 acao_setup_configurar_painel_web() { configurar_painel_web_dominio_principal; }
+acao_setup_atualizar_painel_web() { atualizar_painel_web_instalado; }
 
 # Sites
 acao_site_criar_ultra() { criar_site_ultra; }
@@ -4229,6 +4292,10 @@ mostrar_ajuda_detalhada_menu() {
      Publica o painel web administrativo em domínio próprio (usuário painel_srv),
      com login, acesso a phpMyAdmin, gerenciamento de arquivos e ações básicas.
 
+21 - Atualizar painel web
+     Reinstala helper/script do painel, sincroniza os arquivos publicados do
+     webpanel em producao e reinicia o OpenLiteSpeed sem trocar credenciais.
+
 0  - Sair
      Encerra o painel.
 
@@ -4268,6 +4335,7 @@ menu() {
         echo "19 - Corrigir rewrite (site não WordPress)"
         echo "20 - Configurar domínio principal do painel web"
         echo "H  - Ajuda detalhada das opções"
+        echo "21 - Atualizar painel web"
         echo "0  - Sair"
         echo
         read -rp "Escolha uma opção: " op
@@ -4293,6 +4361,7 @@ menu() {
             18) acao_rewrite_corrigir_permalink_wp ;;
             19) acao_rewrite_corrigir_site_nao_wp ;;
             20) acao_setup_configurar_painel_web ;;
+            21) acao_setup_atualizar_painel_web ;;
             [Hh]) mostrar_ajuda_detalhada_menu ;;
             0) exit 0 ;;
             *) aviso "Opção inválida." ;;
