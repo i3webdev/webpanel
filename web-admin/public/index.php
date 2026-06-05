@@ -499,6 +499,22 @@ function formatUnixTimeUi(int $timestamp): string
     return date('d/m/Y H:i', $timestamp);
 }
 
+function formatIsoTimeUi(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '-';
+    }
+
+    try {
+        $dt = new DateTimeImmutable($value);
+    } catch (Throwable) {
+        return $value;
+    }
+
+    return $dt->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('d/m/Y H:i');
+}
+
 function formatPercentUi(float $value): string
 {
     if ($value < 0) {
@@ -1460,7 +1476,7 @@ try {
             }
         }
 
-        if ($action === 'github_site_clone') {
+        if ($action === 'github_site_clone_start') {
             $tab = 'files';
             $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
             $repoSlug = sanitizeGithubRepoSlug((string) ($_POST['github_repo_slug'] ?? ''));
@@ -1471,7 +1487,7 @@ try {
                 throw new RuntimeException('Informe um site valido e o repositorio no formato owner/repo.');
             }
 
-            [$code, $out, $stderr] = panelExec(['github-site-clone', $siteUser, $repoSlug, $branch, $cleanTarget]);
+            [$code, $out, $stderr] = panelExec(['github-site-clone-start', $siteUser, $repoSlug, $branch, $cleanTarget]);
             $payload = decodeJson($out);
 
             if ($code === 0 && ($payload['ok'] ?? false) === true) {
@@ -1482,18 +1498,20 @@ try {
                 if (($payload['branch'] ?? '') !== '') {
                     $details[] = 'Branch: ' . (string) $payload['branch'];
                 }
+                if (($payload['job_id'] ?? '') !== '') {
+                    $details[] = 'Job: ' . (string) $payload['job_id'];
+                }
                 $actionResult = [
                     'type' => 'success',
-                    'title' => 'Repositorio clonado',
-                    'text' => 'O codigo foi baixado para o site ' . $siteUser . '.',
+                    'title' => 'Clone iniciado',
+                    'text' => 'O clone foi iniciado em background para o site ' . $siteUser . '. Acompanhe o progresso logo abaixo.',
                     'details' => $details,
-                    'pre' => (string) ($payload['output'] ?? ''),
                 ];
             } else {
                 $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
                 $actionResult = [
                     'type' => 'error',
-                    'title' => 'Falha ao clonar repositorio',
+                    'title' => 'Falha ao iniciar clone',
                     'text' => $detail,
                 ];
             }
@@ -1637,6 +1655,8 @@ $fileTotalSize = 0;
 $fileEditingItem = null;
 $githubConfigStatus = [];
 $githubSiteStatus = [];
+$githubRepoList = [];
+$githubCloneStatus = [];
 
 foreach ($fileItems as $item) {
     $fileTotalSize += (int) ($item['size'] ?? 0);
@@ -1661,7 +1681,27 @@ if ($tab === 'files' && $fileSite !== '') {
     } else {
         $githubSiteStatus = ['ok' => false, 'error' => $err];
     }
+
+    [$code, $out, $err] = panelExec(['github-site-clone-status', $fileSite]);
+    if ($code === 0) {
+        $githubCloneStatus = decodeJson($out);
+    } else {
+        $githubCloneStatus = ['ok' => false, 'error' => $err];
+    }
+
+    if (!empty($githubConfigStatus['configured'])) {
+        [$code, $out, $err] = panelExec(['github-repos-list']);
+        if ($code === 0) {
+            $githubRepoList = decodeJson($out);
+        } else {
+            $githubRepoList = ['ok' => false, 'error' => $err];
+        }
+    }
 }
+
+$githubRepos = isset($githubRepoList['repos']) && is_array($githubRepoList['repos']) ? array_values($githubRepoList['repos']) : [];
+$githubCloneRunning = !empty($githubCloneStatus['running']);
+$githubClonePercent = max(0, min(100, (int) ($githubCloneStatus['percent'] ?? 0)));
 
 $serverMetrics = [];
 if ($tab === 'system' || $tab === 'dashboard') {
@@ -2388,6 +2428,55 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                     <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h((string) $githubSiteStatus['error']) ?></div>
                   <?php endif; ?>
 
+                  <?php if (($githubCloneStatus['error'] ?? '') !== ''): ?>
+                    <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h((string) $githubCloneStatus['error']) ?></div>
+                  <?php endif; ?>
+
+                  <?php if (!empty($githubCloneStatus['status_exists'])): ?>
+                    <div class="mt-4 rounded-xl border <?= $githubCloneRunning ? 'border-blue-200 bg-blue-50/70' : (!empty($githubCloneStatus['finished']) && ($githubCloneStatus['state'] ?? '') === 'completed' ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70') ?> p-4" data-github-clone-card="<?= $githubCloneRunning ? 'running' : 'idle' ?>">
+                      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p class="text-xs font-semibold uppercase tracking-[0.14em] <?= $githubCloneRunning ? 'text-blue-700' : 'text-slate-500' ?>">Progresso do clone</p>
+                          <h5 class="mt-1 font-semibold text-slate-900"><?= h((string) (($githubCloneStatus['repo'] ?? '') !== '' ? $githubCloneStatus['repo'] : 'Repositorio em processamento')) ?></h5>
+                          <p class="mt-1 text-sm text-slate-600"><?= h((string) ($githubCloneStatus['detail'] ?? ($githubCloneStatus['message'] ?? 'Aguardando informacoes do clone.'))) ?></p>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                          <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= $githubCloneRunning ? 'bg-blue-100 text-blue-700' : (($githubCloneStatus['state'] ?? '') === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700') ?>">
+                            <?= $githubCloneRunning ? 'Em andamento' : (($githubCloneStatus['state'] ?? '') === 'completed' ? 'Concluido' : 'Interrompido') ?>
+                          </span>
+                          <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"><?= h((string) $githubClonePercent) ?>%</span>
+                        </div>
+                      </div>
+
+                      <div class="mt-4 h-2.5 overflow-hidden rounded-full bg-white/90 ring-1 ring-slate-200">
+                        <div class="h-full rounded-full <?= $githubCloneRunning ? 'bg-blue-600' : (($githubCloneStatus['state'] ?? '') === 'completed' ? 'bg-emerald-600' : 'bg-amber-500') ?>" style="width: <?= h((string) $githubClonePercent) ?>%"></div>
+                      </div>
+
+                      <div class="mt-4 grid gap-3 sm:grid-cols-3 text-sm">
+                        <div class="rounded-xl bg-white/80 px-3 py-2.5">
+                          <p class="text-slate-500">Etapa</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h((string) ($githubCloneStatus['phase'] ?? '-')) ?></p>
+                        </div>
+                        <div class="rounded-xl bg-white/80 px-3 py-2.5">
+                          <p class="text-slate-500">Branch</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h((string) (($githubCloneStatus['branch'] ?? '') !== '' ? $githubCloneStatus['branch'] : '-')) ?></p>
+                        </div>
+                        <div class="rounded-xl bg-white/80 px-3 py-2.5">
+                          <p class="text-slate-500">Atualizado</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h(formatUnixTimeUi((int) ($githubCloneStatus['updated_at'] ?? 0))) ?></p>
+                        </div>
+                      </div>
+
+                      <?php if (($githubCloneStatus['log_tail'] ?? '') !== ''): ?>
+                        <pre class="mt-4 max-h-56 overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-xs text-slate-100"><?= h((string) $githubCloneStatus['log_tail']) ?></pre>
+                      <?php endif; ?>
+
+                      <?php if ($githubCloneRunning): ?>
+                        <p class="mt-3 text-xs text-blue-700">Atualizando automaticamente esta aba a cada 4 segundos enquanto o clone estiver em andamento.</p>
+                      <?php endif; ?>
+                    </div>
+                  <?php endif; ?>
+
                   <?php if (!empty($githubSiteStatus['repo_exists'])): ?>
                     <div class="mt-4 space-y-3 text-sm">
                       <div class="rounded-xl bg-slate-50 px-3 py-2.5">
@@ -2434,29 +2523,68 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                     </form>
                   <?php else: ?>
                     <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                      Esse site ainda nao tem um repositorio Git em `public_html`. Conecte sua conta na aba Sistema e depois faca o primeiro clone abaixo.
+                      Esse site ainda nao tem um repositorio Git em `public_html`. Conecte sua conta na aba Sistema, escolha um repositorio da sua conta e acompanhe o clone aqui mesmo.
                     </div>
 
                     <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                       <h5 class="font-semibold text-slate-900">Clonar repositorio privado</h5>
                       <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                      <input type="hidden" name="action" value="github_site_clone">
+                      <input type="hidden" name="action" value="github_site_clone_start">
                       <input type="hidden" name="return_tab" value="files">
                       <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
 
-                      <div class="mt-3">
-                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Repositorio</label>
-                        <input type="text" name="github_repo_slug" placeholder="owner/repositorio" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
-                      </div>
+                      <?php if (($githubRepoList['error'] ?? '') !== ''): ?>
+                        <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"><?= h((string) $githubRepoList['error']) ?></div>
+                      <?php endif; ?>
+
+                      <?php if ($githubRepos !== []): ?>
+                        <div class="mt-3">
+                          <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Buscar repositorio</label>
+                          <input type="text" placeholder="Filtrar por nome, owner ou branch" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" data-github-repo-filter>
+                          <p class="mt-2 text-xs text-slate-500">Repositorios carregados da conta conectada: <?= h((string) count($githubRepos)) ?></p>
+                        </div>
+                        <div class="mt-3">
+                          <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Escolher repositorio</label>
+                          <select name="github_repo_slug" size="8" required class="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" data-github-repo-select data-github-branch-target="github-branch-input" <?= $githubCloneRunning ? 'disabled' : '' ?>>
+                            <?php foreach ($githubRepos as $repo): ?>
+                              <?php
+                              $repoSlug = (string) ($repo['slug'] ?? '');
+                              $repoPrivate = !empty($repo['private']);
+                              $repoArchived = !empty($repo['archived']);
+                              $repoDefaultBranch = (string) ($repo['default_branch'] ?? '');
+                              $repoUpdatedAt = formatIsoTimeUi((string) ($repo['updated_at'] ?? ''));
+                              $repoLabel = $repoSlug;
+                              $repoLabel .= $repoPrivate ? ' | privado' : ' | publico';
+                              if ($repoArchived) {
+                                  $repoLabel .= ' | arquivado';
+                              }
+                              if ($repoDefaultBranch !== '') {
+                                  $repoLabel .= ' | branch: ' . $repoDefaultBranch;
+                              }
+                              if ($repoUpdatedAt !== '-') {
+                                  $repoLabel .= ' | atualizado: ' . $repoUpdatedAt;
+                              }
+                              ?>
+                              <option value="<?= h($repoSlug) ?>" data-default-branch="<?= h($repoDefaultBranch) ?>"><?= h($repoLabel) ?></option>
+                            <?php endforeach; ?>
+                          </select>
+                        </div>
+                      <?php else: ?>
+                        <div class="mt-3">
+                          <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Repositorio</label>
+                          <input type="text" name="github_repo_slug" placeholder="owner/repositorio" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" <?= $githubCloneRunning ? 'disabled' : '' ?>>
+                        </div>
+                      <?php endif; ?>
+
                       <div class="mt-3">
                         <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Branch inicial</label>
-                        <input type="text" name="github_branch" placeholder="main" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                        <input type="text" id="github-branch-input" name="github_branch" placeholder="main" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" <?= $githubCloneRunning ? 'disabled' : '' ?>>
                       </div>
                       <label class="mt-3 flex items-center gap-2 text-sm text-slate-700">
-                        <input type="checkbox" name="github_clean_target" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                        <input type="checkbox" name="github_clean_target" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" <?= $githubCloneRunning ? 'disabled' : '' ?>>
                         Limpar `public_html` antes do clone
                       </label>
-                      <button type="submit" class="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Clonar no site</button>
+                      <button type="submit" class="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 <?= $githubCloneRunning ? 'opacity-60 cursor-not-allowed' : '' ?>" <?= $githubCloneRunning ? 'disabled' : '' ?>><?= $githubCloneRunning ? 'Clone em andamento' : 'Clonar no site' ?></button>
                     </form>
                   <?php endif; ?>
                 </div>
@@ -3206,5 +3334,61 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
       <?php endif; ?>
     </main>
   </div>
+  <script>
+    (function () {
+      const repoFilter = document.querySelector('[data-github-repo-filter]');
+      const repoSelect = document.querySelector('[data-github-repo-select]');
+      const branchInput = document.getElementById('github-branch-input');
+
+      if (repoFilter && repoSelect) {
+        const allOptions = Array.from(repoSelect.options).map((option) => ({
+          value: option.value,
+          label: option.text,
+          defaultBranch: option.dataset.defaultBranch || ''
+        }));
+
+        const renderOptions = (query) => {
+          const normalized = query.trim().toLowerCase();
+          const matches = allOptions.filter((item) => normalized === '' || item.label.toLowerCase().includes(normalized) || item.value.toLowerCase().includes(normalized));
+
+          repoSelect.innerHTML = '';
+          for (const item of matches) {
+            const option = document.createElement('option');
+            option.value = item.value;
+            option.text = item.label;
+            option.dataset.defaultBranch = item.defaultBranch;
+            repoSelect.appendChild(option);
+          }
+
+          if (repoSelect.options.length > 0) {
+            repoSelect.selectedIndex = 0;
+            if (branchInput && branchInput.value.trim() === '') {
+              branchInput.value = repoSelect.options[0].dataset.defaultBranch || '';
+            }
+          }
+        };
+
+        repoFilter.addEventListener('input', () => renderOptions(repoFilter.value));
+        repoSelect.addEventListener('change', () => {
+          if (!branchInput) {
+            return;
+          }
+          const selected = repoSelect.options[repoSelect.selectedIndex];
+          if (selected) {
+            branchInput.value = selected.dataset.defaultBranch || '';
+          }
+        });
+
+        renderOptions('');
+      }
+
+      const cloneCard = document.querySelector('[data-github-clone-card="running"]');
+      if (cloneCard) {
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 4000);
+      }
+    })();
+  </script>
 </body>
 </html>
