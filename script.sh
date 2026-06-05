@@ -515,10 +515,11 @@ github_clone_job_salvar() {
     local exit_code="${10:-0}"
     local message="${11:-}"
     local log_file="${12:-}"
-    local status_file
+    local status_file tmp_file
 
     status_file="$(github_clone_status_file_por_usuario "$user")"
-    cat > "$status_file" <<EOF
+    tmp_file="$(mktemp "${status_file}.tmp.XXXXXX")" || return 1
+    cat > "$tmp_file" <<EOF
 GITHUB_CLONE_SITE_USER=$(printf '%q' "$user")
 GITHUB_CLONE_STATE=$(printf '%q' "$state")
 GITHUB_CLONE_JOB_ID=$(printf '%q' "$job_id")
@@ -532,7 +533,8 @@ GITHUB_CLONE_EXIT_CODE=$(printf '%q' "$exit_code")
 GITHUB_CLONE_MESSAGE=$(printf '%q' "$message")
 GITHUB_CLONE_LOG_FILE=$(printf '%q' "$log_file")
 EOF
-    chmod 600 "$status_file"
+    chmod 600 "$tmp_file"
+    mv -f "$tmp_file" "$status_file"
 }
 
 github_clone_job_ler() {
@@ -643,6 +645,15 @@ github_clone_job_percentual_por_log() {
     fi
 
     printf '5|Preparando clone|%s\n' "$line"
+}
+
+github_json_int_or_zero() {
+    local value="${1:-0}"
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$value"
+    else
+        printf '0\n'
+    fi
 }
 
 github_git_exec_por_usuario() {
@@ -4380,6 +4391,7 @@ api_github_clone_status_usuario() {
     local repo_dir status_exists="false" repo_exists="false" running="false" finished="false"
     local state="idle" job_id="" repo_slug="" branch="" pid="0" started_at="0" updated_at="0" completed_at="0" exit_code="0" message=""
     local log_file="" progress_raw percent="0" phase="Pronto" detail="" log_tail=""
+    local started_at_json updated_at_json completed_at_json percent_json
 
     if ! usuario_valido "$user"; then
         api_json_erro "Usuario invalido."
@@ -4434,6 +4446,11 @@ api_github_clone_status_usuario() {
         fi
     fi
 
+    started_at_json="$(github_json_int_or_zero "$started_at")"
+    updated_at_json="$(github_json_int_or_zero "$updated_at")"
+    completed_at_json="$(github_json_int_or_zero "$completed_at")"
+    percent_json="$(github_json_int_or_zero "$percent")"
+
     if command -v jq >/dev/null 2>&1; then
         jq -n \
             --arg user "$user" \
@@ -4447,12 +4464,12 @@ api_github_clone_status_usuario() {
             --arg repo "$repo_slug" \
             --arg branch "$branch" \
             --arg pid "$pid" \
-            --argjson started_at "$started_at" \
-            --argjson updated_at "$updated_at" \
-            --argjson completed_at "$completed_at" \
+            --argjson started_at "$started_at_json" \
+            --argjson updated_at "$updated_at_json" \
+            --argjson completed_at "$completed_at_json" \
             --arg exit_code "$exit_code" \
             --arg message "$message" \
-            --argjson percent "$percent" \
+            --argjson percent "$percent_json" \
             --arg phase "$phase" \
             --arg detail "$detail" \
             --arg log_tail "$log_tail" \
@@ -4636,9 +4653,9 @@ api_github_clone_runner_usuario() {
         "$log_file"
 
     if [[ -n "$branch" ]]; then
-        github_git_exec_por_usuario "$user" 1 git clone --progress --branch "$branch" --single-branch "$repo_url" "$repo_dir" >"$log_file" 2>&1
+        github_git_exec_por_usuario "$user" 1 git clone --progress --depth 1 --no-tags --branch "$branch" --single-branch "$repo_url" "$repo_dir" >"$log_file" 2>&1
     else
-        github_git_exec_por_usuario "$user" 1 git clone --progress "$repo_url" "$repo_dir" >"$log_file" 2>&1
+        github_git_exec_por_usuario "$user" 1 git clone --progress --depth 1 --no-tags "$repo_url" "$repo_dir" >"$log_file" 2>&1
     fi
 
     if [[ $? -ne 0 ]]; then
