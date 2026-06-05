@@ -30,6 +30,7 @@ WEB_PANEL_SUDOERS_FILE="/etc/sudoers.d/ultra-panel-helper"
 WEB_PANEL_USER="painel_srv"
 GITHUB_PANEL_CONFIG_DIR="/root/.ultra-panel"
 GITHUB_PANEL_CONFIG_FILE="${GITHUB_PANEL_CONFIG_DIR}/github.env"
+GITHUB_DEVICE_FLOW_FILE="${GITHUB_PANEL_CONFIG_DIR}/github-device-flow.env"
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$CLOUDFLARE_BASE_DIR"
@@ -258,6 +259,17 @@ github_email_valido() {
     [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
 }
 
+github_oauth_client_id_valido() {
+    local client_id="${1:-}"
+    [[ -n "$client_id" && ${#client_id} -le 120 && "$client_id" != *$'\n'* && "$client_id" != *$'\r'* && "$client_id" != *[[:space:]]* ]]
+}
+
+github_oauth_scopes_validos() {
+    local scopes="${1:-}"
+    [[ -n "$scopes" && ${#scopes} -le 120 ]] || return 1
+    [[ "$scopes" =~ ^[A-Za-z0-9:_[:space:]-]+$ ]]
+}
+
 github_autor_nome_valido() {
     local name="${1:-}"
     [[ -n "$name" && ${#name} -le 80 && "$name" != *$'\n'* && "$name" != *$'\r'* ]]
@@ -293,13 +305,19 @@ github_repo_dir_por_usuario() {
     printf '%s/%s/public_html' "$SITES_ROOT" "$user"
 }
 
-github_config_carregar() {
+github_oauth_scopes_padrao() {
+    printf 'repo read:user user:email'
+}
+
+github_config_ler() {
     [[ -f "$GITHUB_PANEL_CONFIG_FILE" ]] || return 1
 
     GITHUB_CFG_USERNAME=""
     GITHUB_CFG_TOKEN=""
     GITHUB_CFG_AUTHOR_NAME=""
     GITHUB_CFG_AUTHOR_EMAIL=""
+    GITHUB_CFG_OAUTH_CLIENT_ID=""
+    GITHUB_CFG_OAUTH_SCOPES="$(github_oauth_scopes_padrao)"
 
     # shellcheck disable=SC1090
     source "$GITHUB_PANEL_CONFIG_FILE"
@@ -308,15 +326,23 @@ github_config_carregar() {
     GITHUB_CFG_TOKEN="${GITHUB_TOKEN:-}"
     GITHUB_CFG_AUTHOR_NAME="${GITHUB_AUTHOR_NAME:-}"
     GITHUB_CFG_AUTHOR_EMAIL="${GITHUB_AUTHOR_EMAIL:-}"
+    GITHUB_CFG_OAUTH_CLIENT_ID="${GITHUB_OAUTH_CLIENT_ID:-}"
+    GITHUB_CFG_OAUTH_SCOPES="${GITHUB_OAUTH_SCOPES:-$(github_oauth_scopes_padrao)}"
+}
+
+github_config_carregar() {
+    github_config_ler || return 1
 
     [[ -n "$GITHUB_CFG_USERNAME" && -n "$GITHUB_CFG_TOKEN" ]]
 }
 
-github_config_salvar() {
+github_config_escrever() {
     local username="${1:-}"
     local token="${2:-}"
     local author_name="${3:-}"
     local author_email="${4:-}"
+    local oauth_client_id="${5:-}"
+    local oauth_scopes="${6:-$(github_oauth_scopes_padrao)}"
 
     mkdir -p "$GITHUB_PANEL_CONFIG_DIR"
     umask 077
@@ -325,12 +351,125 @@ GITHUB_USERNAME=$(printf '%q' "$username")
 GITHUB_TOKEN=$(printf '%q' "$token")
 GITHUB_AUTHOR_NAME=$(printf '%q' "$author_name")
 GITHUB_AUTHOR_EMAIL=$(printf '%q' "$author_email")
+GITHUB_OAUTH_CLIENT_ID=$(printf '%q' "$oauth_client_id")
+GITHUB_OAUTH_SCOPES=$(printf '%q' "$oauth_scopes")
 EOF
     chmod 600 "$GITHUB_PANEL_CONFIG_FILE"
 }
 
+github_config_salvar() {
+    local username="${1:-}"
+    local token="${2:-}"
+    local author_name="${3:-}"
+    local author_email="${4:-}"
+
+    github_config_ler || true
+    github_config_escrever \
+        "$username" \
+        "$token" \
+        "$author_name" \
+        "$author_email" \
+        "${GITHUB_CFG_OAUTH_CLIENT_ID:-}" \
+        "${GITHUB_CFG_OAUTH_SCOPES:-$(github_oauth_scopes_padrao)}"
+}
+
+github_oauth_app_salvar() {
+    local oauth_client_id="${1:-}"
+    local oauth_scopes="${2:-$(github_oauth_scopes_padrao)}"
+
+    github_config_ler || true
+    github_config_escrever \
+        "${GITHUB_CFG_USERNAME:-}" \
+        "${GITHUB_CFG_TOKEN:-}" \
+        "${GITHUB_CFG_AUTHOR_NAME:-}" \
+        "${GITHUB_CFG_AUTHOR_EMAIL:-}" \
+        "$oauth_client_id" \
+        "$oauth_scopes"
+}
+
 github_config_remover() {
     rm -f "$GITHUB_PANEL_CONFIG_FILE"
+    rm -f "$GITHUB_DEVICE_FLOW_FILE"
+}
+
+github_device_flow_salvar() {
+    local device_code="${1:-}"
+    local user_code="${2:-}"
+    local verification_uri="${3:-}"
+    local expires_at="${4:-0}"
+    local interval="${5:-5}"
+    local client_id="${6:-}"
+    local scopes="${7:-$(github_oauth_scopes_padrao)}"
+
+    mkdir -p "$GITHUB_PANEL_CONFIG_DIR"
+    umask 077
+    cat > "$GITHUB_DEVICE_FLOW_FILE" <<EOF
+GITHUB_DEVICE_CODE=$(printf '%q' "$device_code")
+GITHUB_DEVICE_USER_CODE=$(printf '%q' "$user_code")
+GITHUB_DEVICE_VERIFICATION_URI=$(printf '%q' "$verification_uri")
+GITHUB_DEVICE_EXPIRES_AT=$(printf '%q' "$expires_at")
+GITHUB_DEVICE_INTERVAL=$(printf '%q' "$interval")
+GITHUB_DEVICE_CLIENT_ID=$(printf '%q' "$client_id")
+GITHUB_DEVICE_SCOPES=$(printf '%q' "$scopes")
+EOF
+    chmod 600 "$GITHUB_DEVICE_FLOW_FILE"
+}
+
+github_device_flow_ler() {
+    [[ -f "$GITHUB_DEVICE_FLOW_FILE" ]] || return 1
+
+    GITHUB_DEVICE_CODE_VALUE=""
+    GITHUB_DEVICE_USER_CODE_VALUE=""
+    GITHUB_DEVICE_VERIFICATION_URI_VALUE=""
+    GITHUB_DEVICE_EXPIRES_AT_VALUE="0"
+    GITHUB_DEVICE_INTERVAL_VALUE="5"
+    GITHUB_DEVICE_CLIENT_ID_VALUE=""
+    GITHUB_DEVICE_SCOPES_VALUE="$(github_oauth_scopes_padrao)"
+
+    # shellcheck disable=SC1090
+    source "$GITHUB_DEVICE_FLOW_FILE"
+
+    GITHUB_DEVICE_CODE_VALUE="${GITHUB_DEVICE_CODE:-}"
+    GITHUB_DEVICE_USER_CODE_VALUE="${GITHUB_DEVICE_USER_CODE:-}"
+    GITHUB_DEVICE_VERIFICATION_URI_VALUE="${GITHUB_DEVICE_VERIFICATION_URI:-}"
+    GITHUB_DEVICE_EXPIRES_AT_VALUE="${GITHUB_DEVICE_EXPIRES_AT:-0}"
+    GITHUB_DEVICE_INTERVAL_VALUE="${GITHUB_DEVICE_INTERVAL:-5}"
+    GITHUB_DEVICE_CLIENT_ID_VALUE="${GITHUB_DEVICE_CLIENT_ID:-}"
+    GITHUB_DEVICE_SCOPES_VALUE="${GITHUB_DEVICE_SCOPES:-$(github_oauth_scopes_padrao)}"
+}
+
+github_device_flow_limpar() {
+    rm -f "$GITHUB_DEVICE_FLOW_FILE"
+}
+
+github_device_flow_ativa() {
+    github_device_flow_ler || return 1
+    [[ "$GITHUB_DEVICE_EXPIRES_AT_VALUE" =~ ^[0-9]+$ ]] || return 1
+    (( GITHUB_DEVICE_EXPIRES_AT_VALUE > $(date +%s) ))
+}
+
+github_api_user_json() {
+    local token="${1:-}"
+    curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${token}" \
+        https://api.github.com/user
+}
+
+github_api_user_emails_json() {
+    local token="${1:-}"
+    curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${token}" \
+        https://api.github.com/user/emails
+}
+
+github_email_primario_por_token() {
+    local token="${1:-}"
+    local payload
+    payload="$(github_api_user_emails_json "$token" 2>/dev/null || true)"
+    [[ -n "$payload" ]] || return 1
+    echo "$payload" | jq -r 'map(select(.primary == true and .verified == true)) | .[0].email // empty'
 }
 
 github_git_exec_por_usuario() {
@@ -3723,6 +3862,23 @@ api_github_config_status() {
     local author_name=""
     local author_email=""
     local token_masked=""
+    local oauth_client_id=""
+    local oauth_scopes
+    local oauth_app_configured="false"
+    local device_pending="false"
+    local device_user_code=""
+    local device_verification_uri=""
+    local device_interval="0"
+    local device_expires_at="0"
+    local device_seconds_left="0"
+
+    oauth_scopes="$(github_oauth_scopes_padrao)"
+
+    if github_config_ler; then
+        oauth_client_id="${GITHUB_CFG_OAUTH_CLIENT_ID:-}"
+        oauth_scopes="${GITHUB_CFG_OAUTH_SCOPES:-$(github_oauth_scopes_padrao)}"
+        [[ -n "$oauth_client_id" ]] && oauth_app_configured="true"
+    fi
 
     if github_config_carregar; then
         configured="true"
@@ -3732,15 +3888,35 @@ api_github_config_status() {
         token_masked="$(github_token_mask "$GITHUB_CFG_TOKEN")"
     fi
 
+    if github_device_flow_ativa; then
+        device_pending="true"
+        device_user_code="$GITHUB_DEVICE_USER_CODE_VALUE"
+        device_verification_uri="$GITHUB_DEVICE_VERIFICATION_URI_VALUE"
+        device_interval="$GITHUB_DEVICE_INTERVAL_VALUE"
+        device_expires_at="$GITHUB_DEVICE_EXPIRES_AT_VALUE"
+        device_seconds_left="$(( GITHUB_DEVICE_EXPIRES_AT_VALUE - $(date +%s) ))"
+    else
+        github_device_flow_limpar
+    fi
+
     if command -v jq >/dev/null 2>&1; then
         jq -n \
             --argjson configured "$configured" \
+            --argjson oauth_app_configured "$oauth_app_configured" \
             --arg username "$username" \
             --arg author_name "$author_name" \
             --arg author_email "$author_email" \
             --arg token_masked "$token_masked" \
+            --arg oauth_client_id "$oauth_client_id" \
+            --arg oauth_scopes "$oauth_scopes" \
             --arg config_file "$GITHUB_PANEL_CONFIG_FILE" \
-            '{ok:true,configured:$configured,username:$username,author_name:$author_name,author_email:$author_email,token_masked:$token_masked,config_file:$config_file}'
+            --argjson device_pending "$device_pending" \
+            --arg device_user_code "$device_user_code" \
+            --arg device_verification_uri "$device_verification_uri" \
+            --argjson device_interval "$device_interval" \
+            --argjson device_expires_at "$device_expires_at" \
+            --argjson device_seconds_left "$device_seconds_left" \
+            '{ok:true,configured:$configured,oauth_app_configured:$oauth_app_configured,username:$username,author_name:$author_name,author_email:$author_email,token_masked:$token_masked,oauth_client_id:$oauth_client_id,oauth_scopes:$oauth_scopes,config_file:$config_file,device_flow:{pending:$device_pending,user_code:$device_user_code,verification_uri:$device_verification_uri,interval:$device_interval,expires_at:$device_expires_at,seconds_left:$device_seconds_left}}'
     else
         echo "{\"ok\":true}"
     fi
@@ -3777,6 +3953,27 @@ api_github_config_salvar() {
     api_github_config_status
 }
 
+api_github_oauth_app_salvar() {
+    local client_id="${1:-}"
+    local scopes="${2:-$(github_oauth_scopes_padrao)}"
+
+    if ! github_oauth_client_id_valido "$client_id"; then
+        api_json_erro "Client ID do GitHub invalido."
+        return 1
+    fi
+    if ! github_oauth_scopes_validos "$scopes"; then
+        api_json_erro "Scopes do GitHub invalidos."
+        return 1
+    fi
+
+    github_oauth_app_salvar "$client_id" "$scopes" || {
+        api_json_erro "Falha ao salvar configuracao OAuth do GitHub."
+        return 1
+    }
+
+    api_github_config_status
+}
+
 api_github_config_remover() {
     github_config_remover
     if command -v jq >/dev/null 2>&1; then
@@ -3784,6 +3981,143 @@ api_github_config_remover() {
     else
         echo "{\"ok\":true}"
     fi
+}
+
+api_github_device_flow_iniciar() {
+    local client_id=""
+    local scopes
+    local payload device_code user_code verification_uri expires_in interval expires_at
+
+    scopes="$(github_oauth_scopes_padrao)"
+    github_config_ler || true
+    client_id="${GITHUB_CFG_OAUTH_CLIENT_ID:-}"
+    [[ -n "${GITHUB_CFG_OAUTH_SCOPES:-}" ]] && scopes="$GITHUB_CFG_OAUTH_SCOPES"
+
+    if ! github_oauth_client_id_valido "$client_id"; then
+        api_json_erro "Configure primeiro o Client ID do OAuth App do GitHub."
+        return 1
+    fi
+
+    payload="$(curl -fsSL \
+        -H 'Accept: application/json' \
+        -d "client_id=${client_id}" \
+        --data-urlencode "scope=${scopes}" \
+        https://github.com/login/device/code 2>/dev/null)" || {
+        api_json_erro "Falha ao iniciar autorizacao com o GitHub."
+        return 1
+    }
+
+    if [[ "$(echo "$payload" | jq -r '.error // empty' 2>/dev/null)" != "" ]]; then
+        api_json_erro "$(echo "$payload" | jq -r '.error_description // .error')"
+        return 1
+    fi
+
+    device_code="$(echo "$payload" | jq -r '.device_code // empty')"
+    user_code="$(echo "$payload" | jq -r '.user_code // empty')"
+    verification_uri="$(echo "$payload" | jq -r '.verification_uri // empty')"
+    expires_in="$(echo "$payload" | jq -r '.expires_in // 900')"
+    interval="$(echo "$payload" | jq -r '.interval // 5')"
+    expires_at="$(( $(date +%s) + expires_in ))"
+
+    if [[ -z "$device_code" || -z "$user_code" || -z "$verification_uri" ]]; then
+        api_json_erro "Resposta invalida do GitHub ao iniciar autorizacao."
+        return 1
+    fi
+
+    github_device_flow_salvar "$device_code" "$user_code" "$verification_uri" "$expires_at" "$interval" "$client_id" "$scopes" || {
+        api_json_erro "Falha ao persistir estado da autorizacao do GitHub."
+        return 1
+    }
+
+    api_github_config_status
+}
+
+api_github_device_flow_verificar() {
+    local poll_now="${1:-0}"
+    local payload error_code access_token user_payload username author_name author_email
+
+    if ! github_device_flow_ler; then
+        api_json_erro "Nenhuma autorizacao pendente do GitHub encontrada."
+        return 1
+    fi
+    if ! github_device_flow_ativa; then
+        github_device_flow_limpar
+        api_json_erro "A autorizacao pendente do GitHub expirou. Inicie novamente."
+        return 1
+    fi
+
+    if ! bool_sim "$poll_now"; then
+        api_github_config_status
+        return 0
+    fi
+
+    payload="$(curl -fsSL \
+        -H 'Accept: application/json' \
+        -d "client_id=${GITHUB_DEVICE_CLIENT_ID_VALUE}" \
+        -d "device_code=${GITHUB_DEVICE_CODE_VALUE}" \
+        -d 'grant_type=urn:ietf:params:oauth:grant-type:device_code' \
+        https://github.com/login/oauth/access_token 2>/dev/null)" || {
+        api_json_erro "Falha ao consultar autorizacao pendente do GitHub."
+        return 1
+    }
+
+    error_code="$(echo "$payload" | jq -r '.error // empty' 2>/dev/null)"
+    if [[ -n "$error_code" ]]; then
+        case "$error_code" in
+            authorization_pending|slow_down)
+                api_github_config_status
+                return 0
+                ;;
+            access_denied|expired_token|device_flow_disabled|incorrect_client_credentials|incorrect_device_code)
+                github_device_flow_limpar
+                api_json_erro "$(echo "$payload" | jq -r '.error_description // .error')"
+                return 1
+                ;;
+            *)
+                api_json_erro "$(echo "$payload" | jq -r '.error_description // .error')"
+                return 1
+                ;;
+        esac
+    fi
+
+    access_token="$(echo "$payload" | jq -r '.access_token // empty')"
+    if [[ -z "$access_token" ]]; then
+        api_json_erro "O GitHub nao retornou um token de acesso."
+        return 1
+    fi
+
+    user_payload="$(github_api_user_json "$access_token" 2>/dev/null || true)"
+    username="$(echo "$user_payload" | jq -r '.login // empty' 2>/dev/null)"
+    author_name="$(echo "$user_payload" | jq -r '.name // empty' 2>/dev/null)"
+    author_email="$(echo "$user_payload" | jq -r '.email // empty' 2>/dev/null)"
+
+    if [[ -z "$username" ]]; then
+        api_json_erro "Falha ao identificar a conta do GitHub autorizada."
+        return 1
+    fi
+    if [[ -z "$author_name" ]]; then
+        author_name="$username"
+    fi
+    if [[ -z "$author_email" ]]; then
+        author_email="$(github_email_primario_por_token "$access_token" || true)"
+    fi
+    if [[ -z "$author_email" ]]; then
+        author_email="${username}@users.noreply.github.com"
+    fi
+
+    github_config_escrever \
+        "$username" \
+        "$access_token" \
+        "$author_name" \
+        "$author_email" \
+        "$GITHUB_DEVICE_CLIENT_ID_VALUE" \
+        "$GITHUB_DEVICE_SCOPES_VALUE" || {
+        api_json_erro "Falha ao salvar token conectado do GitHub."
+        return 1
+    }
+
+    github_device_flow_limpar
+    api_github_config_status
 }
 
 api_github_status_repositorio_usuario() {
@@ -4158,8 +4492,18 @@ api_main() {
             [[ $# -ge 4 ]] || { api_json_erro "uso: __api github-config-set <usuario> <token> <autor_nome> <autor_email>"; return 1; }
             api_github_config_salvar "$1" "$2" "$3" "$4"
             ;;
+        github-oauth-app-set)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-oauth-app-set <client_id> [scopes]"; return 1; }
+            api_github_oauth_app_salvar "$1" "${2:-$(github_oauth_scopes_padrao)}"
+            ;;
         github-config-clear)
             api_github_config_remover
+            ;;
+        github-device-start)
+            api_github_device_flow_iniciar
+            ;;
+        github-device-poll)
+            api_github_device_flow_verificar "${1:-0}"
             ;;
         github-site-status)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-site-status <site_user>"; return 1; }

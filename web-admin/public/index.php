@@ -375,6 +375,26 @@ function sanitizeGithubToken(string $value): string
     return $value;
 }
 
+function sanitizeGithubClientId(string $value): string
+{
+    $value = trim($value);
+    if ($value === '' || strlen($value) > 120 || str_contains($value, "\n") || str_contains($value, "\r") || preg_match('/\s/', $value) === 1) {
+        return '';
+    }
+
+    return $value;
+}
+
+function sanitizeGithubScopes(string $value): string
+{
+    $value = trim(preg_replace('/\s+/', ' ', $value) ?? '');
+    if ($value === '' || strlen($value) > 120 || preg_match('/^[A-Za-z0-9:_ -]+$/', $value) !== 1) {
+        return '';
+    }
+
+    return $value;
+}
+
 function sanitizeGithubRepoSlug(string $value): string
 {
     $value = trim($value);
@@ -1279,6 +1299,106 @@ try {
                 $actionResult = [
                     'type' => 'error',
                     'title' => 'Falha ao corrigir rewrite',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_oauth_app_save') {
+            $tab = 'system';
+            $clientId = sanitizeGithubClientId((string) ($_POST['github_client_id'] ?? ''));
+            $scopes = sanitizeGithubScopes((string) ($_POST['github_scopes'] ?? ''));
+
+            if ($clientId === '') {
+                throw new RuntimeException('Informe um Client ID valido do GitHub OAuth App.');
+            }
+
+            if ($scopes === '') {
+                $scopes = 'repo read:user user:email';
+            }
+
+            [$code, $out, $stderr] = panelExec(['github-oauth-app-set', $clientId, $scopes]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'App OAuth salvo',
+                    'text' => 'O painel ja pode iniciar a conexao oficial com o GitHub.',
+                    'details' => [
+                        'Client ID: ' . (string) ($payload['oauth_client_id'] ?? $clientId),
+                        'Escopos: ' . (string) ($payload['oauth_scopes'] ?? $scopes),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao salvar App OAuth',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_device_start') {
+            $tab = 'system';
+            [$code, $out, $stderr] = panelExec(['github-device-start']);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $verificationUri = (string) ($payload['verification_uri'] ?? '');
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Autorizacao iniciada',
+                    'text' => 'Abra o GitHub, informe o codigo abaixo e depois volte para verificar a conexao.',
+                    'details' => array_values(array_filter([
+                        (($payload['user_code'] ?? '') !== '' ? 'Codigo: ' . (string) $payload['user_code'] : ''),
+                        ($verificationUri !== '' ? 'URL: ' . $verificationUri : ''),
+                    ])),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao iniciar autorizacao do GitHub',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_device_poll') {
+            $tab = 'system';
+            [$code, $out, $stderr] = panelExec(['github-device-poll', '1']);
+            $payload = decodeJson($out);
+            $pending = !empty($payload['device_flow']['pending']);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true && !empty($payload['configured']) && !$pending) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'GitHub conectado',
+                    'text' => 'A conta foi autorizada e ja pode ser usada nos repositorios privados do painel.',
+                    'details' => array_values(array_filter([
+                        (($payload['username'] ?? '') !== '' ? 'Usuario: ' . (string) $payload['username'] : ''),
+                        ((($payload['author_name'] ?? '') !== '' || ($payload['author_email'] ?? '') !== '') ? 'Autor Git: ' . trim((string) (($payload['author_name'] ?? '') . ' <' . ($payload['author_email'] ?? '') . '>'), ' <>') : ''),
+                    ])),
+                ];
+            } elseif ($code === 0 && ($payload['ok'] ?? false) === true && $pending) {
+                $secondsLeft = (int) ($payload['device_flow']['seconds_left'] ?? 0);
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Autorizacao ainda pendente',
+                    'text' => 'Finalize a permissao no GitHub e clique novamente para verificar.',
+                    'details' => array_values(array_filter([
+                        (($payload['device_flow']['user_code'] ?? '') !== '' ? 'Codigo: ' . (string) $payload['device_flow']['user_code'] : ''),
+                        (($payload['device_flow']['verification_uri'] ?? '') !== '' ? 'URL: ' . (string) $payload['device_flow']['verification_uri'] : ''),
+                        ($secondsLeft > 0 ? 'Expira em: ' . $secondsLeft . 's' : ''),
+                    ])),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao verificar conexao com GitHub',
                     'text' => $detail,
                 ];
             }
@@ -2314,7 +2434,7 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                     </form>
                   <?php else: ?>
                     <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                      Esse site ainda nao tem um repositorio Git em `public_html`. Configure a credencial central na aba Sistema e faca o primeiro clone abaixo.
+                      Esse site ainda nao tem um repositorio Git em `public_html`. Conecte sua conta na aba Sistema e depois faca o primeiro clone abaixo.
                     </div>
 
                     <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -2697,12 +2817,18 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
               <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <h4 class="font-display text-lg font-semibold text-slate-900">GitHub privado</h4>
-                  <p class="mt-1 text-sm text-slate-600">Salve uma credencial central do painel para clonar, atualizar e enviar codigo sem configurar chave SSH em cada site.</p>
+                  <p class="mt-1 text-sm text-slate-600">Conecte sua conta com autorizacao oficial do GitHub e mantenha uma credencial central no painel, sem chave SSH por site.</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubConfigStatus['configured']) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700' ?>">
-                    <?= !empty($githubConfigStatus['configured']) ? 'Credencial ativa' : 'Nao configurado' ?>
+                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubConfigStatus['oauth_app_configured']) ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700' ?>">
+                    <?= !empty($githubConfigStatus['oauth_app_configured']) ? 'OAuth pronto' : 'OAuth pendente' ?>
                   </span>
+                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubConfigStatus['configured']) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700' ?>">
+                    <?= !empty($githubConfigStatus['configured']) ? 'Conta conectada' : 'Nao conectado' ?>
+                  </span>
+                  <?php if (!empty($githubConfigStatus['device_flow']['pending'])): ?>
+                    <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Autorizacao pendente</span>
+                  <?php endif; ?>
                   <?php if (($githubConfigStatus['token_masked'] ?? '') !== ''): ?>
                     <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"><?= h((string) $githubConfigStatus['token_masked']) ?></span>
                   <?php endif; ?>
@@ -2714,35 +2840,120 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
               <?php endif; ?>
 
               <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(260px,0.7fr)]">
-                <form method="post" class="rounded-xl border border-slate-200 bg-white p-4">
-                  <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                  <input type="hidden" name="action" value="github_config_save">
-                  <input type="hidden" name="return_tab" value="system">
+                <div class="space-y-4">
+                  <form method="post" class="rounded-xl border border-slate-200 bg-white p-4">
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="github_oauth_app_save">
+                    <input type="hidden" name="return_tab" value="system">
 
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <div>
-                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario GitHub</label>
-                      <input type="text" name="github_username" value="<?= h((string) ($githubConfigStatus['username'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="seu-usuario">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <h5 class="font-semibold text-slate-900">App OAuth do painel</h5>
+                        <p class="mt-1 text-sm text-slate-600">Cadastre o Client ID do seu GitHub OAuth App para liberar o botao de conexao oficial.</p>
+                      </div>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Passo 1</span>
                     </div>
-                    <div>
-                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Token pessoal</label>
-                      <input type="password" name="github_token" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="ghp_... ou github_pat_...">
+
+                    <div class="mt-4 grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Client ID</label>
+                        <input type="text" name="github_client_id" value="<?= h((string) ($githubConfigStatus['oauth_client_id'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Iv1.0123456789abcdef">
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Escopos</label>
+                        <input type="text" name="github_scopes" value="<?= h((string) (($githubConfigStatus['oauth_scopes'] ?? '') !== '' ? $githubConfigStatus['oauth_scopes'] : 'repo read:user user:email')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="repo read:user user:email">
+                      </div>
                     </div>
-                    <div>
-                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Nome do autor Git</label>
-                      <input type="text" name="github_author_name" value="<?= h((string) ($githubConfigStatus['author_name'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Seu Nome">
+
+                    <div class="mt-4 flex flex-wrap gap-3">
+                      <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Salvar App OAuth</button>
+                      <p class="self-center text-xs text-slate-500">Use o Client ID oficial do app que voce criou no GitHub para este painel.</p>
                     </div>
-                    <div>
-                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Email do autor Git</label>
-                      <input type="email" name="github_author_email" value="<?= h((string) ($githubConfigStatus['author_email'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="dev@empresa.com">
+                  </form>
+
+                  <div class="rounded-xl border border-slate-200 bg-white p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <h5 class="font-semibold text-slate-900">Conectar com GitHub</h5>
+                        <p class="mt-1 text-sm text-slate-600">Depois de salvar o app, gere um codigo de autorizacao e aprove a conexao na sua conta GitHub.</p>
+                      </div>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Passo 2</span>
                     </div>
+
+                    <div class="mt-4 flex flex-wrap gap-3">
+                      <form method="post">
+                        <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                        <input type="hidden" name="action" value="github_device_start">
+                        <input type="hidden" name="return_tab" value="system">
+                        <button type="submit" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700" <?= empty($githubConfigStatus['oauth_app_configured']) ? 'disabled' : '' ?>>Conectar com GitHub</button>
+                      </form>
+                      <?php if (!empty($githubConfigStatus['device_flow']['pending'])): ?>
+                        <form method="post">
+                          <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                          <input type="hidden" name="action" value="github_device_poll">
+                          <input type="hidden" name="return_tab" value="system">
+                          <button type="submit" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Verificar conexao</button>
+                        </form>
+                      <?php endif; ?>
+                    </div>
+
+                    <?php if (empty($githubConfigStatus['oauth_app_configured'])): ?>
+                      <p class="mt-3 text-xs text-slate-500">Salve o Client ID do app antes de iniciar a conexao.</p>
+                    <?php endif; ?>
+
+                    <?php if (!empty($githubConfigStatus['device_flow']['pending'])): ?>
+                      <div class="mt-4 grid gap-3 md:grid-cols-3">
+                        <div class="rounded-xl bg-slate-50 px-3 py-3">
+                          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Codigo</p>
+                          <p class="mt-1 text-lg font-semibold tracking-[0.18em] text-slate-900"><?= h((string) ($githubConfigStatus['device_flow']['user_code'] ?? '-')) ?></p>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-3 md:col-span-2">
+                          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">URL de autorizacao</p>
+                          <p class="mt-1 break-all text-sm font-semibold text-slate-900"><a href="<?= h((string) ($githubConfigStatus['device_flow']['verification_uri'] ?? '#')) ?>" target="_blank" rel="noreferrer" class="text-blue-700 underline decoration-blue-300 underline-offset-2"><?= h((string) ($githubConfigStatus['device_flow']['verification_uri'] ?? '-')) ?></a></p>
+                          <p class="mt-2 text-xs text-slate-500">Tempo restante: <?= h((string) max(0, (int) ($githubConfigStatus['device_flow']['seconds_left'] ?? 0))) ?>s</p>
+                        </div>
+                      </div>
+                    <?php endif; ?>
                   </div>
 
-                  <div class="mt-4 flex flex-wrap gap-3">
-                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Salvar credenciais</button>
-                    <p class="self-center text-xs text-slate-500">O token fica salvo em arquivo root-only e o painel usa autenticacao temporaria por comando.</p>
-                  </div>
-                </form>
+                  <form method="post" class="rounded-xl border border-slate-200 bg-white p-4">
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="github_config_save">
+                    <input type="hidden" name="return_tab" value="system">
+
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <h5 class="font-semibold text-slate-900">Token manual</h5>
+                        <p class="mt-1 text-sm text-slate-600">Fallback para quando voce preferir salvar usuario, token e identidade Git manualmente.</p>
+                      </div>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Opcional</span>
+                    </div>
+
+                    <div class="mt-4 grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario GitHub</label>
+                        <input type="text" name="github_username" value="<?= h((string) ($githubConfigStatus['username'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="seu-usuario">
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Token pessoal</label>
+                        <input type="password" name="github_token" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="ghp_... ou github_pat_...">
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Nome do autor Git</label>
+                        <input type="text" name="github_author_name" value="<?= h((string) ($githubConfigStatus['author_name'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Seu Nome">
+                      </div>
+                      <div>
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Email do autor Git</label>
+                        <input type="email" name="github_author_email" value="<?= h((string) ($githubConfigStatus['author_email'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="dev@empresa.com">
+                      </div>
+                    </div>
+
+                    <div class="mt-4 flex flex-wrap gap-3">
+                      <button type="submit" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Salvar token manual</button>
+                      <p class="self-center text-xs text-slate-500">O token fica salvo em arquivo root-only e o painel usa autenticacao temporaria por comando.</p>
+                    </div>
+                  </form>
+                </div>
 
                 <div class="rounded-xl border border-slate-200 bg-white p-4">
                   <h5 class="font-semibold text-slate-900">Estado atual</h5>
@@ -2754,6 +2965,14 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                     <div class="rounded-xl bg-slate-50 px-3 py-2.5">
                       <p class="text-slate-500">Autor Git padrao</p>
                       <p class="mt-1 font-semibold text-slate-900"><?= h(trim((string) (($githubConfigStatus['author_name'] ?? '') . ' <' . ($githubConfigStatus['author_email'] ?? '') . '>'), ' <>')) ?: '-' ?></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                      <p class="text-slate-500">Client ID OAuth</p>
+                      <p class="mt-1 break-all font-semibold text-slate-900"><?= h((string) (($githubConfigStatus['oauth_client_id'] ?? '') !== '' ? $githubConfigStatus['oauth_client_id'] : '-')) ?></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                      <p class="text-slate-500">Escopos</p>
+                      <p class="mt-1 break-all font-semibold text-slate-900"><?= h((string) (($githubConfigStatus['oauth_scopes'] ?? '') !== '' ? $githubConfigStatus['oauth_scopes'] : '-')) ?></p>
                     </div>
                     <div class="rounded-xl bg-slate-50 px-3 py-2.5">
                       <p class="text-slate-500">Arquivo de configuracao</p>

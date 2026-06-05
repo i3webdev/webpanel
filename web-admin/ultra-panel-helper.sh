@@ -378,8 +378,25 @@ cmd_github_config_set() {
     run_script_api github-config-set "$username" "$token" "$author_name" "$author_email"
 }
 
+cmd_github_oauth_app_set() {
+    local client_id="${1:-}"
+    local scopes="${2:-repo read:user user:email}"
+
+    [[ -n "$client_id" ]] || err "client id do GitHub obrigatorio"
+    run_script_api github-oauth-app-set "$client_id" "$scopes"
+}
+
 cmd_github_config_clear() {
     run_script_api github-config-clear
+}
+
+cmd_github_device_start() {
+    run_script_api github-device-start
+}
+
+cmd_github_device_poll() {
+    local poll_now="${1:-0}"
+    run_script_api github-device-poll "$poll_now"
 }
 
 cmd_github_site_status() {
@@ -702,7 +719,13 @@ main() {
             [[ $# -ge 4 ]] || err "uso: github-config-set <usuario> <token> <autor_nome> <autor_email>"
             cmd_github_config_set "$1" "$2" "$3" "$4"
             ;;
+        github-oauth-app-set)
+            [[ $# -ge 1 ]] || err "uso: github-oauth-app-set <client_id> [scopes]"
+            cmd_github_oauth_app_set "$1" "${2:-repo read:user user:email}"
+            ;;
         github-config-clear) cmd_github_config_clear ;;
+        github-device-start) cmd_github_device_start ;;
+        github-device-poll) cmd_github_device_poll "${1:-0}" ;;
         github-site-status)
             [[ $# -ge 1 ]] || err "uso: github-site-status <site_user>"
             cmd_github_site_status "$1"
