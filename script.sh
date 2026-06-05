@@ -24,6 +24,7 @@ DOMINIO_BASE_PADRAO="i3lab.site"
 FORCAR_DOMINIO_BASE="true"
 WEB_PANEL_SOURCE_DIR="${SCRIPT_DIR}/web-admin"
 WEB_PANEL_INSTALL_DIR="/opt/ultra-web-panel"
+WEB_PANEL_API_SCRIPT="${WEB_PANEL_INSTALL_DIR}/script.sh"
 WEB_PANEL_HELPER_BIN="/usr/local/sbin/ultra-panel-helper"
 WEB_PANEL_SUDOERS_FILE="/etc/sudoers.d/ultra-panel-helper"
 WEB_PANEL_USER="painel_srv"
@@ -494,14 +495,13 @@ instalar_arquivos_painel_web() {
     rm -rf "${WEB_PANEL_INSTALL_DIR:?}/public" "${WEB_PANEL_INSTALL_DIR:?}/config" "${WEB_PANEL_INSTALL_DIR:?}/README.md"
     cp -a "${WEB_PANEL_SOURCE_DIR}/." "$WEB_PANEL_INSTALL_DIR/"
     chmod -R a+rX "$WEB_PANEL_INSTALL_DIR"
+    install -m 700 -o root -g root "$0" "$WEB_PANEL_API_SCRIPT"
 
     install -m 750 -o root -g root "${WEB_PANEL_SOURCE_DIR}/ultra-panel-helper.sh" "$WEB_PANEL_HELPER_BIN"
 
     cat > "$WEB_PANEL_SUDOERS_FILE" <<EOF
 Defaults:${WEB_PANEL_USER} !requiretty
 ${WEB_PANEL_USER} ALL=(root) NOPASSWD: ${WEB_PANEL_HELPER_BIN} *
-Defaults:nobody !requiretty
-nobody ALL=(root) NOPASSWD: ${WEB_PANEL_HELPER_BIN} *
 EOF
     chmod 440 "$WEB_PANEL_SUDOERS_FILE"
 
@@ -584,6 +584,8 @@ EOF
 
     local panel_config_dir="${root_dir}/.ultra-panel"
     mkdir -p "$panel_config_dir"
+    chown "${user}:${user}" "$panel_config_dir"
+    chmod 700 "$panel_config_dir"
 
     cat > "${panel_config_dir}/panel.env" <<EOF
 PANEL_TITLE=ULTRA Web Panel
@@ -591,7 +593,7 @@ PANEL_USER=admin
 PANEL_PASS_HASH=${panel_hash}
 EOF
     chown "${user}:${user}" "${panel_config_dir}/panel.env"
-    chmod 644 "${panel_config_dir}/panel.env"
+    chmod 600 "${panel_config_dir}/panel.env"
 
     local cred_file="/root/${user}_credenciais.txt"
     cat > "$cred_file" <<EOF

@@ -4,7 +4,7 @@ set -euo pipefail
 SITES_ROOT="/home"
 VHOSTS_DIR="/usr/local/lsws/conf/vhosts"
 OLS_SERVICE="lsws"
-ULTRA_SCRIPT_DEFAULT="/root/web-panel/script.sh"
+ULTRA_SCRIPT_DEFAULT="/opt/ultra-web-panel/script.sh"
 
 err() {
     echo "ERRO: $*" >&2
