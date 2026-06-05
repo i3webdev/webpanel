@@ -196,6 +196,79 @@ cmd_restart_services() {
     echo '{"ok":true}'
 }
 
+cmd_install_stack_base() {
+    run_script_api install-stack-base
+}
+
+cmd_configure_phpmyadmin_domain() {
+    local domain_raw="${1:-}"
+    local remove_others="${2:-1}"
+    local create_tunnel="${3:-0}"
+
+    [[ -n "$domain_raw" ]] || err "dominio do phpMyAdmin obrigatorio"
+    run_script_api configure-phpmyadmin-domain "$domain_raw" "$remove_others" "$create_tunnel"
+}
+
+cmd_configure_panel_domain() {
+    local domain_raw="${1:-}"
+    local create_tunnel="${2:-0}"
+
+    [[ -n "$domain_raw" ]] || err "dominio do painel obrigatorio"
+    run_script_api configure-panel-domain "$domain_raw" "$create_tunnel"
+}
+
+cmd_db_rotate_password() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api db-rotate-password "$user"
+}
+
+cmd_site_error_log() {
+    local user="${1:-}"
+    local lines="${2:-80}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ "$lines" =~ ^[0-9]+$ ]] || err "quantidade de linhas invalida"
+    run_script_api site-error-log "$user" "$lines"
+}
+
+cmd_wordpress_fix_permalink() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api wordpress-fix-permalink "$user"
+}
+
+cmd_site_fix_rewrite() {
+    local user="${1:-}"
+    local front_controller="${2:-index.php}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ -n "$front_controller" ]] || err "front controller obrigatorio"
+    run_script_api site-fix-rewrite "$user" "$front_controller"
+}
+
+cmd_htaccess_verify() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api htaccess-verify "$user"
+}
+
+cmd_ols_set_admin() {
+    local admin_user="${1:-admin}"
+    local admin_pass="${2:-}"
+
+    [[ -n "$admin_pass" ]] || err "senha do OLS obrigatoria"
+    run_script_api ols-set-admin "$admin_user" "$admin_pass"
+}
+
+cmd_cloudflare_status() {
+    run_script_api cloudflare-status
+}
+
+cmd_cloudflare_login_start() {
+    run_script_api cloudflare-login-start
+}
+
 cmd_suspend_site() {
     local user="$1"
     site_user_exists "$user" || err "site não encontrado"
@@ -443,6 +516,41 @@ main() {
         list-sites) cmd_list_sites ;;
         service-status) cmd_service_status ;;
         restart-services) cmd_restart_services ;;
+        install-stack-base) cmd_install_stack_base ;;
+        configure-phpmyadmin-domain)
+            [[ $# -ge 1 ]] || err "uso: configure-phpmyadmin-domain <dominio> [remover_outros:0|1] [criar_tunnel:0|1]"
+            cmd_configure_phpmyadmin_domain "$1" "${2:-1}" "${3:-0}"
+            ;;
+        configure-panel-domain)
+            [[ $# -ge 1 ]] || err "uso: configure-panel-domain <dominio> [criar_tunnel:0|1]"
+            cmd_configure_panel_domain "$1" "${2:-0}"
+            ;;
+        db-rotate-password)
+            [[ $# -ge 1 ]] || err "uso: db-rotate-password <site_user>"
+            cmd_db_rotate_password "$1"
+            ;;
+        site-error-log)
+            [[ $# -ge 1 ]] || err "uso: site-error-log <site_user> [linhas]"
+            cmd_site_error_log "$1" "${2:-80}"
+            ;;
+        wordpress-fix-permalink)
+            [[ $# -ge 1 ]] || err "uso: wordpress-fix-permalink <site_user>"
+            cmd_wordpress_fix_permalink "$1"
+            ;;
+        site-fix-rewrite)
+            [[ $# -ge 1 ]] || err "uso: site-fix-rewrite <site_user> [front_controller]"
+            cmd_site_fix_rewrite "$1" "${2:-index.php}"
+            ;;
+        htaccess-verify)
+            [[ $# -ge 1 ]] || err "uso: htaccess-verify <site_user>"
+            cmd_htaccess_verify "$1"
+            ;;
+        ols-set-admin)
+            [[ $# -ge 2 ]] || err "uso: ols-set-admin <usuario> <senha>"
+            cmd_ols_set_admin "$1" "$2"
+            ;;
+        cloudflare-status) cmd_cloudflare_status ;;
+        cloudflare-login-start) cmd_cloudflare_login_start ;;
         suspend-site)
             [[ $# -eq 1 ]] || err "uso: suspend-site <user>"
             cmd_suspend_site "$1"

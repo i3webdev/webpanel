@@ -1432,6 +1432,39 @@ remover_tunnel_site() {
     remover_diretorio_seguro "$CLOUDFLARE_BASE_DIR" "$(cf_site_dir "$user")" || true
 }
 
+cloudflare_login_log_file() {
+    echo "/tmp/ultra-cloudflare-login.log"
+}
+
+cloudflare_login_pid_file() {
+    echo "/tmp/ultra-cloudflare-login.pid"
+}
+
+cloudflare_login_url_from_log() {
+    local log_file="${1:-$(cloudflare_login_log_file)}"
+    [[ -f "$log_file" ]] || return 0
+    grep -Eo 'https://[^[:space:]]+' "$log_file" 2>/dev/null | head -n1 || true
+}
+
+cloudflare_login_pid_running() {
+    local pid_file
+    local pid
+    pid_file="$(cloudflare_login_pid_file)"
+    [[ -f "$pid_file" ]] || return 1
+
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+cloudflare_login_pid_cleanup() {
+    local pid_file
+    pid_file="$(cloudflare_login_pid_file)"
+    if ! cloudflare_login_pid_running; then
+        rm -f "$pid_file"
+    fi
+}
+
 criar_cron_usuario() {
     local user="$1"
     local root_dir="$2"
@@ -2811,6 +2844,665 @@ api_cron_remover_linha() {
     fi
 }
 
+api_instalar_stack_base() {
+    local phpmyadmin_status="ok"
+
+    instalar_repos || {
+        api_json_erro "Falha ao instalar repositorios."
+        return 1
+    }
+    instalar_openlitespeed_php || {
+        api_json_erro "Falha ao instalar OpenLiteSpeed e PHP."
+        return 1
+    }
+    garantir_comando_php_cli >/dev/null 2>&1 || true
+    instalar_banco_redis_cf || {
+        api_json_erro "Falha ao instalar MariaDB/Redis/cloudflared."
+        return 1
+    }
+
+    if ! instalar_phpmyadmin; then
+        phpmyadmin_status="warning"
+    fi
+
+    mkdir -p "$VHOSTS_DIR"
+    if [[ ! -f "$HTTPD_CONF" ]]; then
+        api_json_erro "Arquivo principal do OpenLiteSpeed nao encontrado."
+        return 1
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg phpmyadmin "$phpmyadmin_status" \
+            --arg panel_url "http://localhost:7080" \
+            '{ok:true,phpmyadmin:$phpmyadmin,panel_url:$panel_url}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
+api_configurar_phpmyadmin_principal() {
+    local dominio_raw="${1:-}"
+    local remover_outros="${2:-1}"
+    local criar_cf="${3:-0}"
+
+    local dominio
+    dominio="$(normalizar_dominio "$dominio_raw")"
+    if ! validar_dominio "$dominio"; then
+        api_json_erro "Dominio invalido."
+        return 1
+    fi
+
+    local user="phpmyadmin_srv"
+    local user_existente
+    user_existente="$(resolver_usuario_por_dominio "$dominio" || true)"
+    if [[ -n "$user_existente" && "$user_existente" != "$user" ]] \
+        && [[ -d "${SITES_ROOT}/${user_existente}" || -d "${VHOSTS_DIR}/${user_existente}" ]]; then
+        api_json_erro "Dominio ja esta em uso por outro site (${user_existente})."
+        return 1
+    fi
+
+    local root_dir="${SITES_ROOT}/${user}"
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido para phpMyAdmin."
+        return 1
+    fi
+
+    instalar_phpmyadmin || {
+        api_json_erro "Falha ao instalar phpMyAdmin."
+        return 1
+    }
+    criar_usuario_linux "$user" "$root_dir"
+
+    mkdir -p "${root_dir}" "${root_dir}/logs" "${root_dir}/tmp" "${root_dir}/ssl" "${root_dir}/backups"
+    chown -R "${user}:${user}" "$root_dir"
+    chmod 755 "${root_dir}" "${root_dir}/logs" "${root_dir}/tmp" "${root_dir}/ssl" "${root_dir}/backups"
+
+    local pma_origem
+    pma_origem="$(phpmyadmin_origem_dir)" || {
+        api_json_erro "Diretorio do phpMyAdmin nao encontrado."
+        return 1
+    }
+
+    local public_html="${root_dir}/public_html"
+    if [[ -e "$public_html" && ! -d "$public_html" && ! -L "$public_html" ]]; then
+        api_json_erro "Caminho public_html invalido."
+        return 1
+    fi
+
+    if [[ -L "$public_html" ]]; then
+        rm -f "$public_html"
+    elif [[ -d "$public_html" ]]; then
+        rm -rf "$public_html"
+    fi
+
+    ln -s "$pma_origem" "$public_html"
+    chown -h "${user}:${user}" "$public_html" >/dev/null 2>&1 || true
+
+    criar_vhconf "$user" "$dominio" "$root_dir" "8.4" || {
+        api_json_erro "Falha ao criar vhost do phpMyAdmin."
+        return 1
+    }
+    adicionar_vhost_httpd_conf "$user" "$dominio" "$root_dir" || {
+        api_json_erro "Falha ao registrar vhost do phpMyAdmin."
+        return 1
+    }
+    gerar_cert_local_selfsigned "$user" "$root_dir" "$dominio"
+
+    local removed_links="false"
+    if bool_sim "$remover_outros"; then
+        despublicar_phpmyadmin_dos_sites "$user"
+        removed_links="true"
+    fi
+
+    local tunnel_status="nao_solicitado"
+    if bool_sim "$criar_cf"; then
+        if cloudflare_cert_existe; then
+            if criar_tunnel_site "$user" "$dominio" >/tmp/ultra-api-phpmyadmin-tunnel.log 2>&1; then
+                tunnel_status="ativo"
+            else
+                tunnel_status="falha"
+            fi
+        else
+            tunnel_status="cloudflare_nao_autenticado"
+        fi
+    fi
+
+    systemctl restart lsws >/dev/null 2>&1 || true
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg domain "$dominio" \
+            --arg user "$user" \
+            --arg source "$pma_origem" \
+            --arg tunnel "$tunnel_status" \
+            --argjson removed_links "$removed_links" \
+            '{ok:true,domain:$domain,user:$user,source:$source,tunnel:$tunnel,removed_links:$removed_links}'
+    else
+        echo "{\"ok\":true,\"domain\":\"${dominio}\",\"user\":\"${user}\"}"
+    fi
+}
+
+api_configurar_painel_web_principal() {
+    local dominio_raw="${1:-}"
+    local criar_cf="${2:-0}"
+
+    local dominio
+    dominio="$(normalizar_dominio "$dominio_raw")"
+    if ! validar_dominio "$dominio"; then
+        api_json_erro "Dominio invalido."
+        return 1
+    fi
+
+    local user="$WEB_PANEL_USER"
+    local user_existente
+    user_existente="$(resolver_usuario_por_dominio "$dominio" || true)"
+    if [[ -n "$user_existente" && "$user_existente" != "$user" ]] \
+        && [[ -d "${SITES_ROOT}/${user_existente}" || -d "${VHOSTS_DIR}/${user_existente}" ]]; then
+        api_json_erro "Dominio ja esta em uso por outro site (${user_existente})."
+        return 1
+    fi
+
+    local root_dir="${SITES_ROOT}/${user}"
+    instalar_arquivos_painel_web || {
+        api_json_erro "Falha ao instalar arquivos do painel."
+        return 1
+    }
+    garantir_comando_php_cli >/dev/null 2>&1 || true
+    criar_usuario_linux "$user" "$root_dir"
+
+    mkdir -p "${root_dir}" "${root_dir}/logs" "${root_dir}/tmp" "${root_dir}/ssl" "${root_dir}/backups"
+    chown -R "${user}:${user}" "$root_dir"
+    chmod 755 "${root_dir}" "${root_dir}/logs" "${root_dir}/tmp" "${root_dir}/ssl" "${root_dir}/backups"
+
+    local public_html="${root_dir}/public_html"
+    if [[ -e "$public_html" && ! -d "$public_html" && ! -L "$public_html" ]]; then
+        api_json_erro "Caminho public_html invalido."
+        return 1
+    fi
+
+    if [[ -L "$public_html" ]]; then
+        rm -f "$public_html"
+    fi
+    if [[ ! -d "$public_html" ]]; then
+        mkdir -p "$public_html"
+    fi
+
+    find "$public_html" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "${WEB_PANEL_INSTALL_DIR}/public/." "$public_html/"
+    chown -R "${user}:${user}" "$public_html"
+    chmod -R u+rwX,go+rX "$public_html"
+
+    local panel_pass
+    local panel_hash
+    local hash_script
+    panel_pass="$(gerar_senha)"
+    hash_script="$(mktemp)"
+    cat > "$hash_script" <<'EOF'
+<?php
+if (!isset($argv[1])) {
+    exit(1);
+}
+echo password_hash($argv[1], PASSWORD_DEFAULT);
+EOF
+    panel_hash="$(php "$hash_script" "$panel_pass" 2>/dev/null || true)"
+    rm -f "$hash_script"
+    if [[ -z "$panel_hash" || "$panel_hash" != \$2* && "$panel_hash" != \$argon2* ]]; then
+        api_json_erro "Falha ao gerar hash da senha do painel."
+        return 1
+    fi
+
+    local panel_config_dir="${root_dir}/.ultra-panel"
+    mkdir -p "$panel_config_dir"
+    chown "${user}:${user}" "$panel_config_dir"
+    chmod 700 "$panel_config_dir"
+
+    cat > "${panel_config_dir}/panel.env" <<EOF
+PANEL_TITLE=ULTRA Web Panel
+PANEL_USER=admin
+PANEL_PASS_HASH=${panel_hash}
+EOF
+    chown "${user}:${user}" "${panel_config_dir}/panel.env"
+    chmod 600 "${panel_config_dir}/panel.env"
+
+    local cred_file="/root/${user}_credenciais.txt"
+    cat > "$cred_file" <<EOF
+DOMINIO=${dominio}
+URL=https://${dominio}
+USUARIO=admin
+SENHA=${panel_pass}
+EOF
+    chmod 600 "$cred_file"
+
+    criar_vhconf "$user" "$dominio" "$root_dir" "8.4" || {
+        api_json_erro "Falha ao criar vhost do painel."
+        return 1
+    }
+    adicionar_vhost_httpd_conf "$user" "$dominio" "$root_dir" || {
+        api_json_erro "Falha ao registrar vhost do painel."
+        return 1
+    }
+    gerar_cert_local_selfsigned "$user" "$root_dir" "$dominio"
+
+    local tunnel_status="nao_solicitado"
+    if bool_sim "$criar_cf"; then
+        if cloudflare_cert_existe; then
+            if criar_tunnel_site "$user" "$dominio" >/tmp/ultra-api-panel-tunnel.log 2>&1; then
+                tunnel_status="ativo"
+            else
+                tunnel_status="falha"
+            fi
+        else
+            tunnel_status="cloudflare_nao_autenticado"
+        fi
+    fi
+
+    systemctl restart lsws >/dev/null 2>&1 || true
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg domain "$dominio" \
+            --arg user "$user" \
+            --arg panel_user "admin" \
+            --arg panel_pass "$panel_pass" \
+            --arg cred_file "$cred_file" \
+            --arg tunnel "$tunnel_status" \
+            '{ok:true,domain:$domain,user:$user,login:{user:$panel_user,pass:$panel_pass},credentials_file:$cred_file,tunnel:$tunnel}'
+    else
+        echo "{\"ok\":true,\"domain\":\"${dominio}\",\"user\":\"${user}\"}"
+    fi
+}
+
+api_trocar_senha_banco_por_usuario() {
+    local user="${1:-}"
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+
+    local dbuser="${user}_user"
+    local nova_senha
+    nova_senha="$(gerar_senha)"
+    $MYSQL_BIN -e "ALTER USER '${dbuser}'@'localhost' IDENTIFIED BY '${nova_senha}'; FLUSH PRIVILEGES;" || {
+        api_json_erro "Falha ao alterar senha do banco."
+        return 1
+    }
+
+    if [[ -f "/root/${user}_db.txt" ]]; then
+        sed -i "s/^SENHA=.*/SENHA=${nova_senha}/" "/root/${user}_db.txt"
+    fi
+
+    local env_file="${SITES_ROOT}/${user}/public_html/.env"
+    if [[ -f "$env_file" ]]; then
+        sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${nova_senha}/" "$env_file" || true
+    fi
+
+    local domain
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            --arg dbuser "$dbuser" \
+            --arg pass "$nova_senha" \
+            '{ok:true,site_user:$user,domain:$domain,db_user:$dbuser,new_password:$pass}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_ver_logs_erro_por_usuario() {
+    local user="${1:-}"
+    local linhas="${2:-80}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! "$linhas" =~ ^[0-9]+$ ]]; then
+        api_json_erro "Quantidade de linhas invalida."
+        return 1
+    fi
+
+    local log_file="${SITES_ROOT}/${user}/logs/error.log"
+    if [[ ! -f "$log_file" ]]; then
+        api_json_erro "Log de erro nao encontrado."
+        return 1
+    fi
+
+    local domain
+    local content
+    domain="$(api_dominio_por_usuario "$user" || true)"
+    content="$(tail -n "$linhas" "$log_file" 2>/dev/null || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            --arg file "$log_file" \
+            --arg content "$content" \
+            '{ok:true,site_user:$user,domain:$domain,file:$file,content:$content}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_corrigir_permalink_wordpress_por_usuario() {
+    local user="${1:-}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+
+    local root_dir="${SITES_ROOT}/${user}"
+    if [[ ! -f "${root_dir}/public_html/wp-config.php" ]]; then
+        api_json_erro "WordPress nao detectado nesse site."
+        return 1
+    fi
+
+    baixar_wp_cli || {
+        api_json_erro "Falha ao preparar WP-CLI."
+        return 1
+    }
+    garantir_rewrite_wordpress_site "$user" "$root_dir" || {
+        api_json_erro "Falha ao corrigir rewrite do WordPress."
+        return 1
+    }
+    systemctl restart lsws >/dev/null 2>&1 || true
+
+    local domain
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n --arg user "$user" --arg domain "$domain" '{ok:true,site_user:$user,domain:$domain}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_corrigir_rewrite_por_usuario() {
+    local user="${1:-}"
+    local front_controller="${2:-index.php}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! "$front_controller" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+        api_json_erro "Front controller invalido."
+        return 1
+    fi
+
+    local root_dir="${SITES_ROOT}/${user}"
+    local public_html="${root_dir}/public_html"
+    local htaccess_file="${public_html}/.htaccess"
+    if [[ ! -d "$public_html" ]]; then
+        api_json_erro "Diretorio public_html nao encontrado."
+        return 1
+    fi
+    if [[ -f "${public_html}/wp-config.php" ]]; then
+        api_json_erro "WordPress detectado nesse site. Use a correcao de permalink."
+        return 1
+    fi
+
+    local tmp_sem_bloco
+    tmp_sem_bloco="$(mktemp)"
+    if [[ -f "$htaccess_file" ]]; then
+        cp "$htaccess_file" "${htaccess_file}.bak.$(date +%s)"
+        awk '
+        BEGIN {skip=0}
+        $0 == "# BEGIN ULTRA_REWRITE" {skip=1; next}
+        $0 == "# END ULTRA_REWRITE" {skip=0; next}
+        skip==1 {next}
+        {print}
+        ' "$htaccess_file" > "$tmp_sem_bloco"
+    else
+        : > "$tmp_sem_bloco"
+    fi
+
+    cat >> "$tmp_sem_bloco" <<EOF
+
+# BEGIN ULTRA_REWRITE
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ ${front_controller} [L]
+</IfModule>
+# END ULTRA_REWRITE
+EOF
+
+    mv "$tmp_sem_bloco" "$htaccess_file"
+    chown "${user}:${user}" "$htaccess_file"
+    chmod 644 "$htaccess_file"
+    systemctl restart lsws >/dev/null 2>&1 || true
+
+    local domain
+    domain="$(api_dominio_por_usuario "$user" || true)"
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            --arg front_controller "$front_controller" \
+            --arg htaccess "$htaccess_file" \
+            '{ok:true,site_user:$user,domain:$domain,front_controller:$front_controller,htaccess:$htaccess}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_verificar_htaccess_por_usuario() {
+    local user="${1:-}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+
+    local root_dir="${SITES_ROOT}/${user}"
+    local public_html="${root_dir}/public_html"
+    local htaccess_file="${public_html}/.htaccess"
+    local vhconf_file="${VHOSTS_DIR}/${user}/vhconf.conf"
+    local status_ok="true"
+    local report_file
+    local domain
+    report_file="$(mktemp)"
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    {
+        echo "Domain: ${domain}"
+        echo "User: ${user}"
+        echo "Vhost conf: ${vhconf_file}"
+        echo "Public HTML: ${public_html}"
+        echo
+    } > "$report_file"
+
+    if [[ ! -f "$vhconf_file" ]]; then
+        echo "Vhost conf: MISSING" >> "$report_file"
+        status_ok="false"
+    else
+        local rewrite_enable
+        local autoload_htaccess
+        rewrite_enable="$(awk '
+            BEGIN {in_rewrite=0; val=""}
+            $1 == "rewrite" {in_rewrite=1; next}
+            in_rewrite && $1 == "enable" {val=$2}
+            in_rewrite && /^[[:space:]]*}/ {in_rewrite=0}
+            END {print val}
+        ' "$vhconf_file")"
+        autoload_htaccess="$(awk '
+            BEGIN {in_rewrite=0; val=""}
+            $1 == "rewrite" {in_rewrite=1; next}
+            in_rewrite && $1 == "autoLoadHtaccess" {val=$2}
+            in_rewrite && /^[[:space:]]*}/ {in_rewrite=0}
+            END {print val}
+        ' "$vhconf_file")"
+
+        if [[ "$rewrite_enable" == "1" ]]; then
+            echo "rewrite.enable: OK (1)" >> "$report_file"
+        else
+            echo "rewrite.enable: FAIL (${rewrite_enable:-missing})" >> "$report_file"
+            status_ok="false"
+        fi
+
+        if [[ "$autoload_htaccess" == "1" ]]; then
+            echo "rewrite.autoLoadHtaccess: OK (1)" >> "$report_file"
+        else
+            echo "rewrite.autoLoadHtaccess: FAIL (${autoload_htaccess:-missing})" >> "$report_file"
+            status_ok="false"
+        fi
+    fi
+
+    if [[ -d "$public_html" ]]; then
+        echo "public_html: OK" >> "$report_file"
+    else
+        echo "public_html: FAIL (missing)" >> "$report_file"
+        status_ok="false"
+    fi
+
+    if [[ -f "$htaccess_file" ]]; then
+        local dono_h
+        local grupo_h
+        local perm_h
+        dono_h="$(stat -c '%U' "$htaccess_file" 2>/dev/null || echo '?')"
+        grupo_h="$(stat -c '%G' "$htaccess_file" 2>/dev/null || echo '?')"
+        perm_h="$(stat -c '%a' "$htaccess_file" 2>/dev/null || echo '?')"
+        {
+            echo ".htaccess: OK (${htaccess_file})"
+            echo ".htaccess owner: ${dono_h}:${grupo_h}"
+            echo ".htaccess perms: ${perm_h}"
+        } >> "$report_file"
+    else
+        echo ".htaccess: MISSING (${htaccess_file})" >> "$report_file"
+        status_ok="false"
+    fi
+
+    if systemctl is-active lsws >/dev/null 2>&1; then
+        echo "lsws: active" >> "$report_file"
+    else
+        echo "lsws: inactive" >> "$report_file"
+        status_ok="false"
+    fi
+
+    local content
+    content="$(cat "$report_file")"
+    rm -f "$report_file"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            --arg content "$content" \
+            --argjson healthy "$status_ok" \
+            '{ok:true,site_user:$user,domain:$domain,healthy:$healthy,content:$content}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_definir_credenciais_ols_admin() {
+    local admin_user="${1:-admin}"
+    local admin_pass="${2:-}"
+    local admin_script="${LSWS_DIR}/admin/misc/admpass.sh"
+
+    if [[ ! "$admin_user" =~ ^[a-zA-Z0-9._-]{1,32}$ ]]; then
+        api_json_erro "Usuario admin do OLS invalido."
+        return 1
+    fi
+    if [[ ${#admin_pass} -lt 8 ]]; then
+        api_json_erro "Senha do OLS deve ter ao menos 8 caracteres."
+        return 1
+    fi
+    if [[ ! -x "$admin_script" ]]; then
+        api_json_erro "Script do OpenLiteSpeed admin nao encontrado."
+        return 1
+    fi
+
+    local output
+    output="$(printf '%s\n%s\n%s\n' "$admin_user" "$admin_pass" "$admin_pass" | "$admin_script" 2>&1)" || {
+        api_json_erro "Falha ao atualizar credenciais do OLS admin."
+        return 1
+    }
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n --arg user "$admin_user" --arg output "$output" '{ok:true,user:$user,output:$output}'
+    else
+        echo "{\"ok\":true,\"user\":\"${admin_user}\"}"
+    fi
+}
+
+api_cloudflare_status() {
+    local authenticated="false"
+    local login_running="false"
+    local cert_file="/root/.cloudflared/cert.pem"
+    local log_file
+    local login_url=""
+    local log_excerpt=""
+
+    log_file="$(cloudflare_login_log_file)"
+    cloudflare_cert_existe && authenticated="true"
+    if cloudflare_login_pid_running; then
+        login_running="true"
+    else
+        cloudflare_login_pid_cleanup
+    fi
+    login_url="$(cloudflare_login_url_from_log "$log_file")"
+    if [[ -f "$log_file" ]]; then
+        log_excerpt="$(tail -n 20 "$log_file" 2>/dev/null || true)"
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --argjson authenticated "$authenticated" \
+            --argjson login_running "$login_running" \
+            --arg cert_file "$cert_file" \
+            --arg log_file "$log_file" \
+            --arg login_url "$login_url" \
+            --arg log_excerpt "$log_excerpt" \
+            '{ok:true,authenticated:$authenticated,login_running:$login_running,cert_file:$cert_file,log_file:$log_file,login_url:$login_url,log_excerpt:$log_excerpt}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
+api_cloudflare_login_start() {
+    if cloudflare_cert_existe; then
+        api_cloudflare_status
+        return 0
+    fi
+
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        api_json_erro "cloudflared nao encontrado."
+        return 1
+    fi
+
+    if cloudflare_login_pid_running; then
+        api_cloudflare_status
+        return 0
+    fi
+
+    local log_file
+    local pid_file
+    log_file="$(cloudflare_login_log_file)"
+    pid_file="$(cloudflare_login_pid_file)"
+    rm -f "$log_file" "$pid_file"
+    nohup cloudflared tunnel login >"$log_file" 2>&1 < /dev/null &
+    echo "$!" > "$pid_file"
+    sleep 2
+
+    api_cloudflare_status
+}
+
 api_main() {
     local cmd="${1:-}"
     shift || true
@@ -2843,6 +3535,47 @@ api_main() {
         cron-remove)
             [[ $# -ge 2 ]] || { api_json_erro "uso: __api cron-remove <site_user> <linha_exata>"; return 1; }
             api_cron_remover_linha "$1" "$2"
+            ;;
+        install-stack-base)
+            api_instalar_stack_base
+            ;;
+        configure-phpmyadmin-domain)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api configure-phpmyadmin-domain <dominio> [remover_outros:0|1] [criar_tunnel:0|1]"; return 1; }
+            api_configurar_phpmyadmin_principal "$1" "${2:-1}" "${3:-0}"
+            ;;
+        configure-panel-domain)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api configure-panel-domain <dominio> [criar_tunnel:0|1]"; return 1; }
+            api_configurar_painel_web_principal "$1" "${2:-0}"
+            ;;
+        db-rotate-password)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api db-rotate-password <site_user>"; return 1; }
+            api_trocar_senha_banco_por_usuario "$1"
+            ;;
+        site-error-log)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-error-log <site_user> [linhas]"; return 1; }
+            api_ver_logs_erro_por_usuario "$1" "${2:-80}"
+            ;;
+        wordpress-fix-permalink)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api wordpress-fix-permalink <site_user>"; return 1; }
+            api_corrigir_permalink_wordpress_por_usuario "$1"
+            ;;
+        site-fix-rewrite)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-fix-rewrite <site_user> [front_controller]"; return 1; }
+            api_corrigir_rewrite_por_usuario "$1" "${2:-index.php}"
+            ;;
+        htaccess-verify)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api htaccess-verify <site_user>"; return 1; }
+            api_verificar_htaccess_por_usuario "$1"
+            ;;
+        ols-set-admin)
+            [[ $# -ge 2 ]] || { api_json_erro "uso: __api ols-set-admin <usuario> <senha>"; return 1; }
+            api_definir_credenciais_ols_admin "$1" "$2"
+            ;;
+        cloudflare-status)
+            api_cloudflare_status
+            ;;
+        cloudflare-login-start)
+            api_cloudflare_login_start
             ;;
         *)
             api_json_erro "comando api inválido"
