@@ -359,6 +359,70 @@ function sanitizeCronCommand(string $value): string
     return $value;
 }
 
+function sanitizeGithubUsername(string $value): string
+{
+    $value = trim($value);
+    return preg_match('/^[A-Za-z0-9-]{1,39}$/', $value) === 1 ? $value : '';
+}
+
+function sanitizeGithubToken(string $value): string
+{
+    $value = trim($value);
+    if ($value === '' || strlen($value) < 20 || str_contains($value, "\n") || str_contains($value, "\r") || preg_match('/\s/', $value) === 1) {
+        return '';
+    }
+
+    return $value;
+}
+
+function sanitizeGithubRepoSlug(string $value): string
+{
+    $value = trim($value);
+    return preg_match('/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/', $value) === 1 ? $value : '';
+}
+
+function sanitizeGithubBranch(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+    if (preg_match('/^[A-Za-z0-9._\/-]{1,120}$/', $value) !== 1) {
+        return '';
+    }
+    if (str_contains($value, '..') || str_starts_with($value, '/') || str_ends_with($value, '/')) {
+        return '';
+    }
+
+    return $value;
+}
+
+function sanitizeGithubAuthorName(string $value): string
+{
+    $value = trim($value);
+    if ($value === '' || strlen($value) > 80 || str_contains($value, "\n") || str_contains($value, "\r")) {
+        return '';
+    }
+
+    return $value;
+}
+
+function sanitizeGithubAuthorEmail(string $value): string
+{
+    $value = trim($value);
+    return filter_var($value, FILTER_VALIDATE_EMAIL) ? $value : '';
+}
+
+function sanitizeCommitMessage(string $value): string
+{
+    $value = trim($value);
+    if ($value === '' || strlen($value) > 200 || str_contains($value, "\n") || str_contains($value, "\r")) {
+        return '';
+    }
+
+    return $value;
+}
+
 function decodeJson(string $json): array
 {
     $decoded = json_decode($json, true);
@@ -385,6 +449,144 @@ function serviceStatusUiClass(string $status): string
     }
 
     return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
+}
+
+function formatBytesUi(int $bytes): string
+{
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+
+    $units = ['KB', 'MB', 'GB', 'TB'];
+    $value = $bytes;
+
+    foreach ($units as $unit) {
+        $value /= 1024;
+        if ($value < 1024 || $unit === 'TB') {
+            return number_format($value, $value >= 10 ? 0 : 1, ',', '.') . ' ' . $unit;
+        }
+    }
+
+    return $bytes . ' B';
+}
+
+function formatUnixTimeUi(int $timestamp): string
+{
+    if ($timestamp <= 0) {
+        return '-';
+    }
+
+    return date('d/m/Y H:i', $timestamp);
+}
+
+function formatPercentUi(float $value): string
+{
+    if ($value < 0) {
+        $value = 0;
+    }
+    if ($value > 100) {
+        $value = 100;
+    }
+
+    return number_format($value, 1, ',', '.') . '%';
+}
+
+function formatUptimeUi(int $seconds): string
+{
+    if ($seconds <= 0) {
+        return '-';
+    }
+
+    $days = intdiv($seconds, 86400);
+    $hours = intdiv($seconds % 86400, 3600);
+    $minutes = intdiv($seconds % 3600, 60);
+    $parts = [];
+
+    if ($days > 0) {
+        $parts[] = $days . 'd';
+    }
+    if ($hours > 0 || $days > 0) {
+        $parts[] = $hours . 'h';
+    }
+    $parts[] = $minutes . 'min';
+
+    return implode(' ', $parts);
+}
+
+function metricBarClass(float $percent): string
+{
+    if ($percent >= 85) {
+        return 'bg-rose-500';
+    }
+    if ($percent >= 65) {
+        return 'bg-amber-500';
+    }
+
+    return 'bg-emerald-500';
+}
+
+function fileTypeLabel(string $type): string
+{
+    if ($type === 'dir') {
+        return 'Pasta';
+    }
+
+    if ($type === 'link') {
+        return 'Link';
+    }
+
+    return 'Arquivo';
+}
+
+function fileTypeBadgeClass(string $type): string
+{
+    if ($type === 'dir') {
+        return 'bg-amber-100 text-amber-800 ring-1 ring-amber-200';
+    }
+
+    if ($type === 'link') {
+        return 'bg-sky-100 text-sky-800 ring-1 ring-sky-200';
+    }
+
+    return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
+}
+
+function fileTypeIcon(string $type): string
+{
+    if ($type === 'dir') {
+        return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5 text-amber-500" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke-linejoin="round"/></svg>';
+    }
+
+    if ($type === 'link') {
+        return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5 text-sky-500" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5"/><path d="M14 11a5 5 0 0 0-7.07 0L5.5 12.43a5 5 0 0 0 7.07 7.07L14 18"/></svg>';
+    }
+
+    return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5 text-slate-500" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v6h6"/></svg>';
+}
+
+function buildFileBreadcrumbs(string $current): array
+{
+    $breadcrumbs = [
+        ['label' => 'public_html', 'path' => ''],
+    ];
+
+    if ($current === '') {
+        return $breadcrumbs;
+    }
+
+    $segments = explode('/', $current);
+    $path = '';
+
+    foreach ($segments as $segment) {
+        if ($segment === '') {
+            continue;
+        }
+
+        $path = $path === '' ? $segment : $path . '/' . $segment;
+        $breadcrumbs[] = ['label' => $segment, 'path' => $path];
+    }
+
+    return $breadcrumbs;
 }
 
 function tabIcon(string $tab): string
@@ -1081,6 +1283,173 @@ try {
                 ];
             }
         }
+
+        if ($action === 'github_config_save') {
+            $tab = 'system';
+            $username = sanitizeGithubUsername((string) ($_POST['github_username'] ?? ''));
+            $token = sanitizeGithubToken((string) ($_POST['github_token'] ?? ''));
+            $authorName = sanitizeGithubAuthorName((string) ($_POST['github_author_name'] ?? ''));
+            $authorEmail = sanitizeGithubAuthorEmail((string) ($_POST['github_author_email'] ?? ''));
+
+            if ($username === '' || $token === '' || $authorName === '' || $authorEmail === '') {
+                throw new RuntimeException('Preencha usuario, token, nome e email validos para integrar o GitHub.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['github-config-set', $username, $token, $authorName, $authorEmail]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'GitHub configurado',
+                    'text' => 'Credencial central salva para uso com repositorios privados.',
+                    'details' => [
+                        'Usuario: ' . (string) ($payload['username'] ?? $username),
+                        'Autor Git: ' . (string) (($payload['author_name'] ?? $authorName) . ' <' . ($payload['author_email'] ?? $authorEmail) . '>'),
+                        'Arquivo: ' . (string) ($payload['config_file'] ?? ''),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao salvar credenciais do GitHub',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_config_clear') {
+            $tab = 'system';
+            [$code, $out, $stderr] = panelExec(['github-config-clear']);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Credenciais do GitHub removidas',
+                    'text' => 'A integracao central foi limpa do painel.',
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao remover credenciais do GitHub',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_site_clone') {
+            $tab = 'files';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            $repoSlug = sanitizeGithubRepoSlug((string) ($_POST['github_repo_slug'] ?? ''));
+            $branch = sanitizeGithubBranch((string) ($_POST['github_branch'] ?? ''));
+            $cleanTarget = !empty($_POST['github_clean_target']) ? '1' : '0';
+
+            if ($siteUser === '' || $repoSlug === '') {
+                throw new RuntimeException('Informe um site valido e o repositorio no formato owner/repo.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['github-site-clone', $siteUser, $repoSlug, $branch, $cleanTarget]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $details = [
+                    'Repositorio: ' . (string) ($payload['repo'] ?? $repoSlug),
+                    'Destino: ' . (string) ($payload['path'] ?? ''),
+                ];
+                if (($payload['branch'] ?? '') !== '') {
+                    $details[] = 'Branch: ' . (string) $payload['branch'];
+                }
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Repositorio clonado',
+                    'text' => 'O codigo foi baixado para o site ' . $siteUser . '.',
+                    'details' => $details,
+                    'pre' => (string) ($payload['output'] ?? ''),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao clonar repositorio',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_site_pull') {
+            $tab = 'files';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para atualizar repositorio.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['github-site-pull', $siteUser]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Repositorio atualizado',
+                    'text' => 'Alteracoes remotas aplicadas no site ' . $siteUser . '.',
+                    'details' => [
+                        'Branch: ' . (string) ($payload['branch'] ?? ''),
+                        'Pasta: ' . (string) ($payload['path'] ?? ''),
+                    ],
+                    'pre' => (string) ($payload['output'] ?? ''),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao executar pull',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'github_site_commit_push') {
+            $tab = 'files';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            $commitMessage = sanitizeCommitMessage((string) ($_POST['github_commit_message'] ?? ''));
+
+            if ($siteUser === '' || $commitMessage === '') {
+                throw new RuntimeException('Informe um site valido e uma mensagem de commit sem quebras de linha.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['github-site-commit-push', $siteUser, $commitMessage]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                if (!empty($payload['no_changes'])) {
+                    $actionResult = [
+                        'type' => 'success',
+                        'title' => 'Nenhuma alteracao para enviar',
+                        'text' => 'O repositório do site ' . $siteUser . ' ja estava sem mudancas pendentes.',
+                    ];
+                } else {
+                    $actionResult = [
+                        'type' => 'success',
+                        'title' => 'Commit e push concluidos',
+                        'text' => 'Alteracoes enviadas para o GitHub no site ' . $siteUser . '.',
+                        'details' => [
+                            'Branch: ' . (string) ($payload['branch'] ?? ''),
+                            'Pasta: ' . (string) ($payload['path'] ?? ''),
+                        ],
+                        'pre' => trim((string) ($payload['commit_output'] ?? '') . "\n\n" . (string) ($payload['push_output'] ?? '')),
+                    ];
+                }
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao fazer commit/push',
+                    'text' => $detail,
+                ];
+            }
+        }
     }
 } catch (Throwable $e) {
     setFlash('error', $e->getMessage());
@@ -1135,6 +1504,52 @@ if ($tab === 'files' && $fileSite !== '') {
         } else {
             $fileReadError = $err;
         }
+    }
+}
+
+$fileItems = isset($fileList['items']) && is_array($fileList['items']) ? array_values($fileList['items']) : [];
+$fileCurrentPath = (string) ($fileList['current'] ?? '');
+$fileParentPath = (string) ($fileList['parent'] ?? '');
+$fileBreadcrumbs = buildFileBreadcrumbs($fileCurrentPath);
+$fileDirectoryCount = count(array_filter($fileItems, static fn(array $item): bool => (($item['type'] ?? 'file') === 'dir')));
+$fileEntryCount = count($fileItems);
+$fileTotalSize = 0;
+$fileEditingItem = null;
+$githubConfigStatus = [];
+$githubSiteStatus = [];
+
+foreach ($fileItems as $item) {
+    $fileTotalSize += (int) ($item['size'] ?? 0);
+    if ($fileEdit !== '' && (string) ($item['relpath'] ?? '') === $fileEdit) {
+        $fileEditingItem = $item;
+    }
+}
+
+if ($tab === 'system' || $tab === 'files') {
+    [$code, $out, $err] = panelExec(['github-config-status']);
+    if ($code === 0) {
+        $githubConfigStatus = decodeJson($out);
+    } else {
+        $githubConfigStatus = ['ok' => false, 'error' => $err];
+    }
+}
+
+if ($tab === 'files' && $fileSite !== '') {
+    [$code, $out, $err] = panelExec(['github-site-status', $fileSite]);
+    if ($code === 0) {
+        $githubSiteStatus = decodeJson($out);
+    } else {
+        $githubSiteStatus = ['ok' => false, 'error' => $err];
+    }
+}
+
+$serverMetrics = [];
+if ($tab === 'system' || $tab === 'dashboard') {
+    [$code, $out, $err] = panelExec(['server-metrics']);
+    if ($code === 0) {
+        $serverMetrics = decodeJson($out);
+    } else {
+        $serverMetrics = ['ok' => false, 'error' => $err];
     }
 }
 
@@ -1218,6 +1633,10 @@ $csrf = csrfToken();
 $totalSites = count($sites);
 $suspendedSites = count(array_filter($sites, static fn(array $s): bool => !empty($s['suspended'])));
 $activeTunnelSites = count(array_filter($sites, static fn(array $s): bool => (($s['tunnel'] ?? '') === 'ativo')));
+$cpuPercent = (float) ($serverMetrics['cpu']['percent'] ?? 0);
+$memoryPercent = (float) ($serverMetrics['memory']['percent'] ?? 0);
+$diskRootPercent = (float) ($serverMetrics['disk']['root']['percent'] ?? 0);
+$uptimeSeconds = (int) ($serverMetrics['uptime']['seconds'] ?? 0);
 $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
 ?>
 <!doctype html>
@@ -1327,6 +1746,10 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
       <?php endif; ?>
 
       <?php if ($tab === 'dashboard'): ?>
+        <?php if (($serverMetrics['error'] ?? '') !== ''): ?>
+          <div class="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Falha ao carregar metricas do servidor: <?= h((string) $serverMetrics['error']) ?></div>
+        <?php endif; ?>
+
         <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
             <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Sites totais</p>
@@ -1346,6 +1769,44 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
           </article>
         </section>
 
+        <section class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Uso de CPU</p>
+              <span class="text-xs font-semibold text-slate-400"><?= h((string) ($serverMetrics['cpu']['cores'] ?? '-')) ?> core(s)</span>
+            </div>
+            <p class="mt-3 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($cpuPercent)) ?></p>
+            <div class="mt-3 h-2 rounded-full bg-slate-100">
+              <div class="h-2 rounded-full <?= h(metricBarClass($cpuPercent)) ?>" style="width: <?= h((string) max(2, min(100, $cpuPercent))) ?>%"></div>
+            </div>
+            <p class="mt-3 text-xs text-slate-500">Load: <?= h((string) (($serverMetrics['cpu']['load']['one'] ?? '0') . ' / ' . ($serverMetrics['cpu']['load']['five'] ?? '0') . ' / ' . ($serverMetrics['cpu']['load']['fifteen'] ?? '0'))) ?></p>
+          </article>
+
+          <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Uso de RAM</p>
+            <p class="mt-3 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($memoryPercent)) ?></p>
+            <div class="mt-3 h-2 rounded-full bg-slate-100">
+              <div class="h-2 rounded-full <?= h(metricBarClass($memoryPercent)) ?>" style="width: <?= h((string) max(2, min(100, $memoryPercent))) ?>%"></div>
+            </div>
+            <p class="mt-3 text-xs text-slate-500"><?= h(formatBytesUi((int) ($serverMetrics['memory']['used'] ?? 0))) ?> de <?= h(formatBytesUi((int) ($serverMetrics['memory']['total'] ?? 0))) ?></p>
+          </article>
+
+          <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Disco raiz</p>
+            <p class="mt-3 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($diskRootPercent)) ?></p>
+            <div class="mt-3 h-2 rounded-full bg-slate-100">
+              <div class="h-2 rounded-full <?= h(metricBarClass($diskRootPercent)) ?>" style="width: <?= h((string) max(2, min(100, $diskRootPercent))) ?>%"></div>
+            </div>
+            <p class="mt-3 text-xs text-slate-500"><?= h(formatBytesUi((int) ($serverMetrics['disk']['root']['used'] ?? 0))) ?> usados em <?= h((string) ($serverMetrics['disk']['root']['mount'] ?? '/')) ?></p>
+          </article>
+
+          <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Uptime</p>
+            <p class="mt-3 font-display text-3xl font-semibold text-slate-900"><?= h(formatUptimeUi($uptimeSeconds)) ?></p>
+            <p class="mt-3 text-xs text-slate-500">Servidor ativo continuamente desde o ultimo boot.</p>
+          </article>
+        </section>
+
         <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
           <h3 class="font-display text-xl font-semibold text-slate-900">Status de servicos</h3>
           <div class="mt-4 flex flex-wrap gap-2">
@@ -1360,6 +1821,44 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
             <?php endforeach; ?>
           </div>
         </section>
+
+        <?php if (!empty($serverMetrics['disk']['mounts']) && is_array($serverMetrics['disk']['mounts'])): ?>
+          <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <h3 class="font-display text-xl font-semibold text-slate-900">Uso de disco por particao</h3>
+            <div class="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+              <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                  <tr>
+                    <th class="px-4 py-3">Mount</th>
+                    <th class="px-4 py-3">Filesystem</th>
+                    <th class="px-4 py-3">Uso</th>
+                    <th class="px-4 py-3">Livre</th>
+                    <th class="px-4 py-3">Percentual</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200 bg-white">
+                  <?php foreach ($serverMetrics['disk']['mounts'] as $mount): ?>
+                    <?php $mountPercent = (float) ($mount['percent'] ?? 0); ?>
+                    <tr class="hover:bg-slate-50">
+                      <td class="px-4 py-3 font-semibold text-slate-900"><?= h((string) ($mount['mount'] ?? '-')) ?></td>
+                      <td class="px-4 py-3 text-slate-600"><?= h((string) ($mount['filesystem'] ?? '-')) ?></td>
+                      <td class="px-4 py-3 text-slate-600"><?= h(formatBytesUi((int) ($mount['used'] ?? 0))) ?></td>
+                      <td class="px-4 py-3 text-slate-600"><?= h(formatBytesUi((int) ($mount['available'] ?? 0))) ?></td>
+                      <td class="px-4 py-3">
+                        <div class="flex min-w-[180px] items-center gap-3">
+                          <div class="h-2 flex-1 rounded-full bg-slate-100">
+                            <div class="h-2 rounded-full <?= h(metricBarClass($mountPercent)) ?>" style="width: <?= h((string) max(2, min(100, $mountPercent))) ?>%"></div>
+                          </div>
+                          <span class="w-14 text-right text-xs font-semibold text-slate-700"><?= h(formatPercentUi($mountPercent)) ?></span>
+                        </div>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        <?php endif; ?>
       <?php endif; ?>
 
       <?php if ($tab === 'sites'): ?>
@@ -1511,12 +2010,34 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
 
       <?php if ($tab === 'files'): ?>
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-          <h3 class="font-display text-xl font-semibold text-slate-900">Gerenciador de arquivos</h3>
+          <?php
+          $fileSiteDomain = '-';
+          foreach ($fileSites as $site) {
+              if ((string) ($site['user'] ?? '') === $fileSite) {
+                  $fileSiteDomain = (string) ($site['domain'] ?? '-');
+                  break;
+              }
+          }
+          ?>
 
-          <form method="get" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Workspace</p>
+              <h3 class="mt-1 font-display text-xl font-semibold text-slate-900">Gerenciador de arquivos</h3>
+              <p class="mt-1 text-sm text-slate-500">Navegue pelos arquivos do site, edite rapidamente e mantenha a estrutura organizada.</p>
+            </div>
+            <?php if ($fileSite !== ''): ?>
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <p class="font-semibold text-slate-900"><?= h($fileSite) ?></p>
+                <p class="text-slate-500"><?= h($fileSiteDomain) ?></p>
+              </div>
+            <?php endif; ?>
+          </div>
+
+          <form method="get" class="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_auto]">
             <input type="hidden" name="tab" value="files">
 
-            <div class="sm:col-span-2 lg:col-span-1">
+            <div>
               <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
               <select name="site" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                 <?php foreach ($fileSites as $site): ?>
@@ -1526,13 +2047,13 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
               </select>
             </div>
 
-            <div class="sm:col-span-2 lg:col-span-2">
+            <div>
               <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Pasta relativa</label>
               <input name="path" value="<?= h($filePath) ?>" placeholder="ex: wp-content/themes" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
             </div>
 
             <div class="flex items-end">
-              <button type="submit" class="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Abrir</button>
+              <button type="submit" class="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Abrir pasta</button>
             </div>
           </form>
 
@@ -1541,91 +2062,321 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
           <?php endif; ?>
 
           <?php if ($fileSite !== ''): ?>
-            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p class="text-sm text-slate-600">Raiz: <span class="font-semibold text-slate-800">/home/<?= h($fileSite) ?>/public_html<?= $fileList['current'] !== '' ? '/' . h((string) $fileList['current']) : '' ?></span></p>
-              <?php if (($fileList['parent'] ?? '') !== '' || $filePath !== ''): ?>
-                <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => (string) ($fileList['parent'] ?? '')])) ?>" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100">Voltar pasta</a>
-              <?php endif; ?>
-            </div>
-
-            <div class="mt-4 overflow-x-auto rounded-xl border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 text-sm">
-                <thead class="bg-slate-50 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
-                  <tr>
-                    <th class="px-4 py-3">Nome</th>
-                    <th class="px-4 py-3">Tipo</th>
-                    <th class="px-4 py-3">Tamanho</th>
-                    <th class="px-4 py-3">Acoes</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-200 bg-white">
-                  <?php foreach (($fileList['items'] ?? []) as $item): ?>
-                    <?php
-                    $name = (string) ($item['name'] ?? '');
-                    $type = (string) ($item['type'] ?? 'file');
-                    $rel = (string) ($item['relpath'] ?? '');
-                    ?>
-                    <tr class="hover:bg-slate-50">
-                      <td class="px-4 py-3 font-medium text-slate-900"><?= h($name) ?></td>
-                      <td class="px-4 py-3 text-slate-600"><?= h($type) ?></td>
-                      <td class="px-4 py-3 text-slate-600"><?= h((string) ($item['size'] ?? 0)) ?></td>
-                      <td class="px-4 py-3">
-                        <div class="flex flex-wrap gap-2">
-                          <?php if ($type === 'dir'): ?>
-                            <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $rel])) ?>" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">Abrir</a>
-                          <?php else: ?>
-                            <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $filePath, 'edit' => $rel])) ?>" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100">Editar</a>
-                          <?php endif; ?>
-
-                          <form method="post" onsubmit="return confirm('Remover este item?');">
-                            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                            <input type="hidden" name="action" value="file_delete">
-                            <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
-                            <input type="hidden" name="target_path" value="<?= h($rel) ?>">
-                            <input type="hidden" name="current_path" value="<?= h($filePath) ?>">
-                            <button type="submit" class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100">Excluir</button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
+            <div class="mt-5 grid gap-4 xl:grid-cols-4">
+              <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 p-4 text-white xl:col-span-2">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Caminho atual</p>
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                  <?php foreach ($fileBreadcrumbs as $index => $crumb): ?>
+                    <?php $isLastCrumb = $index === array_key_last($fileBreadcrumbs); ?>
+                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => (string) $crumb['path']])) ?>" class="rounded-full px-3 py-1.5 <?= $isLastCrumb ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-100 hover:bg-white/20' ?> transition">
+                      <?= h((string) $crumb['label']) ?>
+                    </a>
+                    <?php if (!$isLastCrumb): ?>
+                      <span class="text-slate-500">/</span>
+                    <?php endif; ?>
                   <?php endforeach; ?>
-                </tbody>
-              </table>
+                </div>
+                <p class="mt-3 break-all text-sm text-slate-300">/home/<?= h($fileSite) ?>/public_html<?= $fileCurrentPath !== '' ? '/' . h($fileCurrentPath) : '' ?></p>
+                <div class="mt-4 flex flex-wrap gap-2">
+                  <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => ''])) ?>" class="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">Raiz do site</a>
+                  <?php if ($fileParentPath !== '' || $filePath !== ''): ?>
+                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $fileParentPath])) ?>" class="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">Voltar um nivel</a>
+                  <?php endif; ?>
+                </div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Itens na pasta</p>
+                <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h((string) $fileEntryCount) ?></p>
+                <p class="mt-1 text-sm text-slate-500"><?= h((string) $fileDirectoryCount) ?> pasta(s) e <?= h((string) ($fileEntryCount - $fileDirectoryCount)) ?> arquivo(s)</p>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Volume listado</p>
+                <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h(formatBytesUi($fileTotalSize)) ?></p>
+                <p class="mt-1 text-sm text-slate-500"><?= $fileEdit !== '' ? 'Editor aberto para um arquivo.' : 'Nenhum arquivo em edicao no momento.' ?></p>
+              </div>
             </div>
 
-            <div class="mt-5 grid gap-4 lg:grid-cols-2">
-              <form method="post" class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <h4 class="font-display text-lg font-semibold text-slate-900">Novo diretorio</h4>
-                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                <input type="hidden" name="action" value="file_mkdir">
-                <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
-                <input type="hidden" name="current_path" value="<?= h($filePath) ?>">
-                <input name="new_dir" placeholder="ex: nova-pasta" required class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
-                <button type="submit" class="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Criar</button>
-              </form>
+            <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.85fr)_minmax(320px,0.95fr)]">
+              <div class="min-w-0">
+                <div class="rounded-2xl border border-slate-200 bg-white">
+                  <div class="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h4 class="font-display text-lg font-semibold text-slate-900">Conteudo da pasta</h4>
+                      <p class="mt-1 text-sm text-slate-500">Visual profissional com leitura rapida de tipo, tamanho e ultima modificacao.</p>
+                    </div>
+                    <div class="w-full lg:max-w-xs">
+                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filtro rapido</label>
+                      <input
+                        type="search"
+                        placeholder="Filtrar por nome"
+                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                        oninput="const q=this.value.toLowerCase(); document.querySelectorAll('[data-file-row]').forEach((row)=>{row.classList.toggle('hidden', !row.dataset.search.includes(q));});"
+                      >
+                    </div>
+                  </div>
 
-              <form method="post" enctype="multipart/form-data" class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <h4 class="font-display text-lg font-semibold text-slate-900">Upload de arquivo</h4>
-                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                <input type="hidden" name="action" value="file_upload">
-                <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
-                <input type="hidden" name="current_path" value="<?= h($filePath) ?>">
-                <input type="file" name="upload_file" required class="mt-3 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-blue-700 hover:file:bg-blue-100">
-                <button type="submit" class="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">Enviar</button>
-              </form>
+                  <?php if ($fileItems === []): ?>
+                    <div class="px-6 py-12 text-center">
+                      <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                        <svg viewBox="0 0 24 24" fill="none" class="h-7 w-7" stroke="currentColor" stroke-width="1.8"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></svg>
+                      </div>
+                      <h5 class="mt-4 font-display text-lg font-semibold text-slate-900">Pasta vazia</h5>
+                      <p class="mt-1 text-sm text-slate-500">Use as acoes laterais para criar um diretorio ou enviar arquivos para este local.</p>
+                    </div>
+                  <?php else: ?>
+                    <div class="overflow-x-auto">
+                      <table class="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead class="bg-slate-50 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                          <tr>
+                            <th class="px-4 py-3">Nome</th>
+                            <th class="px-4 py-3">Tipo</th>
+                            <th class="px-4 py-3">Tamanho</th>
+                            <th class="px-4 py-3">Modificado</th>
+                            <th class="px-4 py-3">Acoes</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200 bg-white">
+                          <?php foreach ($fileItems as $item): ?>
+                            <?php
+                            $name = (string) ($item['name'] ?? '');
+                            $type = (string) ($item['type'] ?? 'file');
+                            $rel = (string) ($item['relpath'] ?? '');
+                            $size = (int) ($item['size'] ?? 0);
+                            $mtime = (int) ($item['mtime'] ?? 0);
+                            ?>
+                            <tr data-file-row data-search="<?= h(strtolower($name . ' ' . $type)) ?>" class="hover:bg-slate-50">
+                              <td class="px-4 py-3">
+                                <div class="flex items-center gap-3">
+                                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
+                                    <?= fileTypeIcon($type) ?>
+                                  </div>
+                                  <div class="min-w-0">
+                                    <p class="truncate font-semibold text-slate-900"><?= h($name) ?></p>
+                                    <p class="truncate text-xs text-slate-500"><?= h($rel) ?></p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td class="px-4 py-3">
+                                <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= h(fileTypeBadgeClass($type)) ?>"><?= h(fileTypeLabel($type)) ?></span>
+                              </td>
+                              <td class="px-4 py-3 text-slate-600"><?= h($type === 'dir' ? '--' : formatBytesUi($size)) ?></td>
+                              <td class="px-4 py-3 text-slate-600"><?= h(formatUnixTimeUi($mtime)) ?></td>
+                              <td class="px-4 py-3">
+                                <div class="flex flex-wrap gap-2">
+                                  <?php if ($type === 'dir'): ?>
+                                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $rel])) ?>" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">Abrir</a>
+                                  <?php else: ?>
+                                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $fileCurrentPath, 'edit' => $rel])) ?>" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100">Editar</a>
+                                  <?php endif; ?>
+
+                                  <form method="post" onsubmit="return confirm('Remover este item?');">
+                                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                                    <input type="hidden" name="action" value="file_delete">
+                                    <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                                    <input type="hidden" name="target_path" value="<?= h($rel) ?>">
+                                    <input type="hidden" name="current_path" value="<?= h($fileCurrentPath) ?>">
+                                    <button type="submit" class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100">Excluir</button>
+                                  </form>
+                                </div>
+                              </td>
+                            </tr>
+                          <?php endforeach; ?>
+                        </tbody>
+                      </table>
+                    </div>
+                  <?php endif; ?>
+                </div>
+
+                <?php if ($fileEdit !== ''): ?>
+                  <form method="post" class="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-600">Editor</p>
+                        <h4 class="mt-1 font-display text-lg font-semibold text-slate-900"><?= h(basename($fileEdit)) ?></h4>
+                        <p class="mt-1 break-all text-sm text-slate-500"><?= h($fileEdit) ?></p>
+                      </div>
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                        <?php if (is_array($fileEditingItem)): ?>
+                          <p><span class="font-semibold text-slate-900"><?= h(fileTypeLabel((string) ($fileEditingItem['type'] ?? 'file'))) ?></span> | <?= h(formatBytesUi((int) ($fileEditingItem['size'] ?? 0))) ?></p>
+                          <p class="mt-1">Modificado em <?= h(formatUnixTimeUi((int) ($fileEditingItem['mtime'] ?? 0))) ?></p>
+                        <?php else: ?>
+                          <p>Arquivo carregado para edicao.</p>
+                        <?php endif; ?>
+                      </div>
+                    </div>
+
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="file_save">
+                    <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                    <input type="hidden" name="file_path" value="<?= h($fileEdit) ?>">
+                    <textarea name="file_content" spellcheck="false" class="mt-4 min-h-[420px] w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"><?= h($fileContent) ?></textarea>
+                    <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $fileCurrentPath])) ?>" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Fechar editor</a>
+                      <button type="submit" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Salvar arquivo</button>
+                    </div>
+                  </form>
+                <?php endif; ?>
+              </div>
+
+              <aside class="space-y-5">
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h4 class="font-display text-lg font-semibold text-slate-900">Acoes rapidas</h4>
+                  <p class="mt-1 text-sm text-slate-500">Trabalhe na pasta atual sem perder o contexto da navegacao.</p>
+
+                  <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                    <h5 class="font-semibold text-slate-900">Novo diretorio</h5>
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="file_mkdir">
+                    <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                    <input type="hidden" name="current_path" value="<?= h($fileCurrentPath) ?>">
+                    <input name="new_dir" placeholder="ex: assets, backups, private" required class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                    <button type="submit" class="mt-3 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Criar pasta</button>
+                  </form>
+
+                  <form method="post" enctype="multipart/form-data" class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                    <h5 class="font-semibold text-slate-900">Upload de arquivo</h5>
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="file_upload">
+                    <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                    <input type="hidden" name="current_path" value="<?= h($fileCurrentPath) ?>">
+                    <input type="file" name="upload_file" required class="mt-3 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-blue-700 hover:file:bg-blue-100">
+                    <button type="submit" class="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">Enviar arquivo</button>
+                  </form>
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h4 class="font-display text-lg font-semibold text-slate-900">GitHub do site</h4>
+                      <p class="mt-1 text-sm text-slate-500">Clone privado, sincronize alteracoes e envie commits sem SSH no usuario do site.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubConfigStatus['configured']) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700' ?>">
+                        <?= !empty($githubConfigStatus['configured']) ? 'Acesso pronto' : 'Configurar no sistema' ?>
+                      </span>
+                      <?php if (!empty($githubSiteStatus['repo_exists'])): ?>
+                        <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubSiteStatus['dirty']) ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700' ?>">
+                          <?= !empty($githubSiteStatus['dirty']) ? 'Com alteracoes locais' : 'Repositorio limpo' ?>
+                        </span>
+                      <?php endif; ?>
+                    </div>
+                  </div>
+
+                  <?php if (($githubSiteStatus['error'] ?? '') !== ''): ?>
+                    <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h((string) $githubSiteStatus['error']) ?></div>
+                  <?php endif; ?>
+
+                  <?php if (!empty($githubSiteStatus['repo_exists'])): ?>
+                    <div class="mt-4 space-y-3 text-sm">
+                      <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                        <p class="text-slate-500">Remote</p>
+                        <p class="mt-1 break-all font-semibold text-slate-900"><?= h((string) ($githubSiteStatus['remote'] ?? '-')) ?></p>
+                      </div>
+                      <div class="grid gap-3 sm:grid-cols-3">
+                        <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                          <p class="text-slate-500">Branch</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h((string) ($githubSiteStatus['branch'] ?? '-')) ?></p>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                          <p class="text-slate-500">Ahead</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h((string) ($githubSiteStatus['ahead'] ?? '0')) ?></p>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                          <p class="text-slate-500">Behind</p>
+                          <p class="mt-1 font-semibold text-slate-900"><?= h((string) ($githubSiteStatus['behind'] ?? '0')) ?></p>
+                        </div>
+                      </div>
+                      <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                        <p class="text-slate-500">Ultimo commit</p>
+                        <p class="mt-1 break-all font-semibold text-slate-900"><?= h((string) (($githubSiteStatus['last_commit'] ?? '') !== '' ? $githubSiteStatus['last_commit'] : '-')) ?></p>
+                      </div>
+                    </div>
+
+                    <form method="post" class="mt-4">
+                      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                      <input type="hidden" name="action" value="github_site_pull">
+                      <input type="hidden" name="return_tab" value="files">
+                      <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                      <button type="submit" class="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Atualizar com pull</button>
+                    </form>
+
+                    <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <h5 class="font-semibold text-slate-900">Commit e push</h5>
+                      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                      <input type="hidden" name="action" value="github_site_commit_push">
+                      <input type="hidden" name="return_tab" value="files">
+                      <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+                      <label class="mb-1 mt-3 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Mensagem de commit</label>
+                      <input type="text" name="github_commit_message" placeholder="ex: Atualiza layout da home" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                      <button type="submit" class="mt-3 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Commitar e enviar</button>
+                    </form>
+                  <?php else: ?>
+                    <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                      Esse site ainda nao tem um repositorio Git em `public_html`. Configure a credencial central na aba Sistema e faca o primeiro clone abaixo.
+                    </div>
+
+                    <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <h5 class="font-semibold text-slate-900">Clonar repositorio privado</h5>
+                      <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                      <input type="hidden" name="action" value="github_site_clone">
+                      <input type="hidden" name="return_tab" value="files">
+                      <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
+
+                      <div class="mt-3">
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Repositorio</label>
+                        <input type="text" name="github_repo_slug" placeholder="owner/repositorio" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                      </div>
+                      <div class="mt-3">
+                        <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Branch inicial</label>
+                        <input type="text" name="github_branch" placeholder="main" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                      </div>
+                      <label class="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" name="github_clean_target" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                        Limpar `public_html` antes do clone
+                      </label>
+                      <button type="submit" class="mt-4 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Clonar no site</button>
+                    </form>
+                  <?php endif; ?>
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <h4 class="font-display text-lg font-semibold text-slate-900">Resumo da pasta</h4>
+                  <div class="mt-4 space-y-3 text-sm">
+                    <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                      <span class="text-slate-500">Site selecionado</span>
+                      <span class="font-semibold text-slate-900"><?= h($fileSite) ?></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                      <span class="text-slate-500">Pasta atual</span>
+                      <span class="max-w-[55%] truncate font-semibold text-slate-900"><?= h($fileCurrentPath !== '' ? $fileCurrentPath : 'public_html') ?></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                      <span class="text-slate-500">Pastas</span>
+                      <span class="font-semibold text-slate-900"><?= h((string) $fileDirectoryCount) ?></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                      <span class="text-slate-500">Arquivos listados</span>
+                      <span class="font-semibold text-slate-900"><?= h((string) ($fileEntryCount - $fileDirectoryCount)) ?></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                      <span class="text-slate-500">Tamanho total</span>
+                      <span class="font-semibold text-slate-900"><?= h(formatBytesUi($fileTotalSize)) ?></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <h4 class="font-display text-lg font-semibold text-slate-900">Boas praticas</h4>
+                  <ul class="mt-3 space-y-3 text-sm text-slate-600">
+                    <li class="rounded-xl bg-slate-50 px-3 py-2.5">Edite arquivos pequenos direto no painel e prefira versionar alteracoes maiores no Git.</li>
+                    <li class="rounded-xl bg-slate-50 px-3 py-2.5">Antes de apagar uma pasta, confirme se ela nao guarda uploads ou backups do site.</li>
+                    <li class="rounded-xl bg-slate-50 px-3 py-2.5">Use a navegacao por breadcrumbs para voltar rapidamente sem editar o caminho manualmente.</li>
+                  </ul>
+                </div>
+              </aside>
             </div>
-
-            <?php if ($fileEdit !== ''): ?>
-              <form method="post" class="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-                <h4 class="font-display text-lg font-semibold text-slate-900">Editando: <?= h($fileEdit) ?></h4>
-                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                <input type="hidden" name="action" value="file_save">
-                <input type="hidden" name="site_user" value="<?= h($fileSite) ?>">
-                <input type="hidden" name="file_path" value="<?= h($fileEdit) ?>">
-                <textarea name="file_content" class="mt-3 min-h-[360px] w-full rounded-xl border border-slate-300 bg-white px-3 py-3 font-mono text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"><?= h($fileContent) ?></textarea>
-                <button type="submit" class="mt-3 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Salvar arquivo</button>
-              </form>
-            <?php endif; ?>
           <?php endif; ?>
         </section>
       <?php endif; ?>
@@ -1754,6 +2505,99 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
             </table>
           </div>
 
+          <?php if (($serverMetrics['error'] ?? '') !== ''): ?>
+            <div class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Falha ao carregar metricas do servidor: <?= h((string) $serverMetrics['error']) ?></div>
+          <?php endif; ?>
+
+          <div class="mt-5 grid gap-4 xl:grid-cols-4">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">CPU atual</p>
+              <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($cpuPercent)) ?></p>
+              <div class="mt-3 h-2 rounded-full bg-white">
+                <div class="h-2 rounded-full <?= h(metricBarClass($cpuPercent)) ?>" style="width: <?= h((string) max(2, min(100, $cpuPercent))) ?>%"></div>
+              </div>
+              <p class="mt-3 text-xs text-slate-500">Load: <?= h((string) (($serverMetrics['cpu']['load']['one'] ?? '0') . ' / ' . ($serverMetrics['cpu']['load']['five'] ?? '0') . ' / ' . ($serverMetrics['cpu']['load']['fifteen'] ?? '0'))) ?></p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Memoria RAM</p>
+              <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($memoryPercent)) ?></p>
+              <div class="mt-3 h-2 rounded-full bg-white">
+                <div class="h-2 rounded-full <?= h(metricBarClass($memoryPercent)) ?>" style="width: <?= h((string) max(2, min(100, $memoryPercent))) ?>%"></div>
+              </div>
+              <p class="mt-3 text-xs text-slate-500"><?= h(formatBytesUi((int) ($serverMetrics['memory']['used'] ?? 0))) ?> / <?= h(formatBytesUi((int) ($serverMetrics['memory']['total'] ?? 0))) ?></p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Disco raiz</p>
+              <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h(formatPercentUi($diskRootPercent)) ?></p>
+              <div class="mt-3 h-2 rounded-full bg-white">
+                <div class="h-2 rounded-full <?= h(metricBarClass($diskRootPercent)) ?>" style="width: <?= h((string) max(2, min(100, $diskRootPercent))) ?>%"></div>
+              </div>
+              <p class="mt-3 text-xs text-slate-500"><?= h(formatBytesUi((int) ($serverMetrics['disk']['root']['available'] ?? 0))) ?> livres</p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Uptime</p>
+              <p class="mt-2 font-display text-3xl font-semibold text-slate-900"><?= h(formatUptimeUi($uptimeSeconds)) ?></p>
+              <p class="mt-3 text-xs text-slate-500"><?= h((string) ($serverMetrics['cpu']['cores'] ?? '-')) ?> core(s) detectados</p>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Particoes monitoradas</h4>
+              <div class="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead class="bg-slate-50 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th class="px-4 py-3">Mount</th>
+                      <th class="px-4 py-3">Uso</th>
+                      <th class="px-4 py-3">Livre</th>
+                      <th class="px-4 py-3">Percentual</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-200 bg-white">
+                    <?php foreach (($serverMetrics['disk']['mounts'] ?? []) as $mount): ?>
+                      <?php $mountPercent = (float) ($mount['percent'] ?? 0); ?>
+                      <tr class="hover:bg-slate-50">
+                        <td class="px-4 py-3 font-semibold text-slate-900"><?= h((string) ($mount['mount'] ?? '-')) ?></td>
+                        <td class="px-4 py-3 text-slate-600"><?= h(formatBytesUi((int) ($mount['used'] ?? 0))) ?></td>
+                        <td class="px-4 py-3 text-slate-600"><?= h(formatBytesUi((int) ($mount['available'] ?? 0))) ?></td>
+                        <td class="px-4 py-3">
+                          <div class="flex min-w-[180px] items-center gap-3">
+                            <div class="h-2 flex-1 rounded-full bg-slate-100">
+                              <div class="h-2 rounded-full <?= h(metricBarClass($mountPercent)) ?>" style="width: <?= h((string) max(2, min(100, $mountPercent))) ?>%"></div>
+                            </div>
+                            <span class="w-14 text-right text-xs font-semibold text-slate-700"><?= h(formatPercentUi($mountPercent)) ?></span>
+                          </div>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Processos mais ativos</h4>
+              <div class="mt-4 space-y-3">
+                <?php foreach (($serverMetrics['top_processes'] ?? []) as $process): ?>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="font-semibold text-slate-900"><?= h((string) ($process['command'] ?? '-')) ?></p>
+                      <span class="text-xs font-semibold text-slate-500">PID <?= h((string) ($process['pid'] ?? '-')) ?></span>
+                    </div>
+                    <div class="mt-2 flex items-center justify-between text-xs text-slate-600">
+                      <span>CPU <?= h((string) ($process['cpu'] ?? '0')) ?>%</span>
+                      <span>RAM <?= h((string) ($process['mem'] ?? '0')) ?>%</span>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
+          </div>
+
           <div class="mt-5 grid gap-5 xl:grid-cols-2">
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h4 class="font-display text-lg font-semibold text-slate-900">Instalacao base</h4>
@@ -1847,6 +2691,84 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                 </div>
                 <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Salvar credenciais</button>
               </form>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 xl:col-span-2">
+              <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h4 class="font-display text-lg font-semibold text-slate-900">GitHub privado</h4>
+                  <p class="mt-1 text-sm text-slate-600">Salve uma credencial central do painel para clonar, atualizar e enviar codigo sem configurar chave SSH em cada site.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($githubConfigStatus['configured']) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700' ?>">
+                    <?= !empty($githubConfigStatus['configured']) ? 'Credencial ativa' : 'Nao configurado' ?>
+                  </span>
+                  <?php if (($githubConfigStatus['token_masked'] ?? '') !== ''): ?>
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"><?= h((string) $githubConfigStatus['token_masked']) ?></span>
+                  <?php endif; ?>
+                </div>
+              </div>
+
+              <?php if (($githubConfigStatus['error'] ?? '') !== ''): ?>
+                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h((string) $githubConfigStatus['error']) ?></div>
+              <?php endif; ?>
+
+              <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(260px,0.7fr)]">
+                <form method="post" class="rounded-xl border border-slate-200 bg-white p-4">
+                  <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                  <input type="hidden" name="action" value="github_config_save">
+                  <input type="hidden" name="return_tab" value="system">
+
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario GitHub</label>
+                      <input type="text" name="github_username" value="<?= h((string) ($githubConfigStatus['username'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="seu-usuario">
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Token pessoal</label>
+                      <input type="password" name="github_token" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="ghp_... ou github_pat_...">
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Nome do autor Git</label>
+                      <input type="text" name="github_author_name" value="<?= h((string) ($githubConfigStatus['author_name'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Seu Nome">
+                    </div>
+                    <div>
+                      <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Email do autor Git</label>
+                      <input type="email" name="github_author_email" value="<?= h((string) ($githubConfigStatus['author_email'] ?? '')) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="dev@empresa.com">
+                    </div>
+                  </div>
+
+                  <div class="mt-4 flex flex-wrap gap-3">
+                    <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Salvar credenciais</button>
+                    <p class="self-center text-xs text-slate-500">O token fica salvo em arquivo root-only e o painel usa autenticacao temporaria por comando.</p>
+                  </div>
+                </form>
+
+                <div class="rounded-xl border border-slate-200 bg-white p-4">
+                  <h5 class="font-semibold text-slate-900">Estado atual</h5>
+                  <div class="mt-3 space-y-3 text-sm">
+                    <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                      <p class="text-slate-500">Usuario autenticado</p>
+                      <p class="mt-1 font-semibold text-slate-900"><?= h((string) (($githubConfigStatus['username'] ?? '') !== '' ? $githubConfigStatus['username'] : '-')) ?></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                      <p class="text-slate-500">Autor Git padrao</p>
+                      <p class="mt-1 font-semibold text-slate-900"><?= h(trim((string) (($githubConfigStatus['author_name'] ?? '') . ' <' . ($githubConfigStatus['author_email'] ?? '') . '>'), ' <>')) ?: '-' ?></p>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 px-3 py-2.5">
+                      <p class="text-slate-500">Arquivo de configuracao</p>
+                      <p class="mt-1 break-all font-semibold text-slate-900"><?= h((string) (($githubConfigStatus['config_file'] ?? '') !== '' ? $githubConfigStatus['config_file'] : '-')) ?></p>
+                    </div>
+                  </div>
+
+                  <form method="post" class="mt-4" onsubmit="return confirm('Remover a credencial central do GitHub do painel?');">
+                    <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                    <input type="hidden" name="action" value="github_config_clear">
+                    <input type="hidden" name="return_tab" value="system">
+                    <button type="submit" class="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100">Limpar credenciais</button>
+                  </form>
+                </div>
+              </div>
             </div>
           </div>
 

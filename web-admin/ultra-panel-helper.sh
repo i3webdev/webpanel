@@ -196,6 +196,98 @@ cmd_restart_services() {
     echo '{"ok":true}'
 }
 
+cmd_server_metrics() {
+    local mem_total_kb mem_available_kb mem_used_kb mem_percent
+    mem_total_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    mem_available_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    mem_used_kb=$((mem_total_kb - mem_available_kb))
+    mem_percent="0"
+    if [[ "$mem_total_kb" -gt 0 ]]; then
+        mem_percent="$(awk -v used="$mem_used_kb" -v total="$mem_total_kb" 'BEGIN { printf "%.1f", (used / total) * 100 }')"
+    fi
+
+    local cpu_line_a cpu_line_b cpu_percent
+    read -r _ cpu_user_a cpu_nice_a cpu_system_a cpu_idle_a cpu_iowait_a cpu_irq_a cpu_softirq_a cpu_steal_a _ < /proc/stat
+    sleep 0.4
+    read -r _ cpu_user_b cpu_nice_b cpu_system_b cpu_idle_b cpu_iowait_b cpu_irq_b cpu_softirq_b cpu_steal_b _ < /proc/stat
+
+    local idle_a idle_b total_a total_b delta_idle delta_total
+    idle_a=$((cpu_idle_a + cpu_iowait_a))
+    idle_b=$((cpu_idle_b + cpu_iowait_b))
+    total_a=$((cpu_user_a + cpu_nice_a + cpu_system_a + cpu_idle_a + cpu_iowait_a + cpu_irq_a + cpu_softirq_a + cpu_steal_a))
+    total_b=$((cpu_user_b + cpu_nice_b + cpu_system_b + cpu_idle_b + cpu_iowait_b + cpu_irq_b + cpu_softirq_b + cpu_steal_b))
+    delta_idle=$((idle_b - idle_a))
+    delta_total=$((total_b - total_a))
+    cpu_percent="0"
+    if [[ "$delta_total" -gt 0 ]]; then
+        cpu_percent="$(awk -v idle="$delta_idle" -v total="$delta_total" 'BEGIN { printf "%.1f", (1 - (idle / total)) * 100 }')"
+    fi
+
+    local load1 load5 load15
+    read -r load1 load5 load15 _ < /proc/loadavg
+    local cpu_cores
+    cpu_cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
+
+    local uptime_seconds uptime_days uptime_hours uptime_minutes
+    uptime_seconds="$(cut -d'.' -f1 /proc/uptime 2>/dev/null || echo 0)"
+    uptime_days=$((uptime_seconds / 86400))
+    uptime_hours=$(((uptime_seconds % 86400) / 3600))
+    uptime_minutes=$(((uptime_seconds % 3600) / 60))
+
+    local disk_root_json
+    disk_root_json="$(df -B1 --output=source,size,used,avail,pcent,target / 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); printf("{\"filesystem\":\"%s\",\"size\":%s,\"used\":%s,\"available\":%s,\"percent\":%s,\"mount\":\"%s\"}", $1, $2, $3, $4, $5, $6)}')"
+    [[ -n "$disk_root_json" ]] || disk_root_json='{"filesystem":"","size":0,"used":0,"available":0,"percent":0,"mount":"/"}'
+
+    local disks_json
+    disks_json="$(df -B1 --output=source,size,used,avail,pcent,target -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {gsub(/%/,"",$5); printf("%s{\"filesystem\":\"%s\",\"size\":%s,\"used\":%s,\"available\":%s,\"percent\":%s,\"mount\":\"%s\"}", sep, $1, $2, $3, $4, $5, $6); sep="," } END { printf("") }')"
+
+    local top_json
+    top_json="$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu 2>/dev/null | awk 'NR>1 && count<5 {printf("%s{\"pid\":%s,\"command\":\"%s\",\"cpu\":%s,\"mem\":%s}", sep, $1, $2, $3, $4); sep=","; count++ } END { printf("") }')"
+
+    jq -n \
+        --argjson cpu_percent "$cpu_percent" \
+        --argjson cpu_cores "$cpu_cores" \
+        --arg load1 "$load1" \
+        --arg load5 "$load5" \
+        --arg load15 "$load15" \
+        --argjson mem_total "$((mem_total_kb * 1024))" \
+        --argjson mem_used "$((mem_used_kb * 1024))" \
+        --argjson mem_available "$((mem_available_kb * 1024))" \
+        --argjson mem_percent "$mem_percent" \
+        --argjson uptime_seconds "$uptime_seconds" \
+        --argjson uptime_days "$uptime_days" \
+        --argjson uptime_hours "$uptime_hours" \
+        --argjson uptime_minutes "$uptime_minutes" \
+        --argjson disk_root "$disk_root_json" \
+        --argjson disks "[$disks_json]" \
+        --argjson top_processes "[$top_json]" \
+        '{
+            ok: true,
+            cpu: {
+                percent: $cpu_percent,
+                cores: $cpu_cores,
+                load: {one: $load1, five: $load5, fifteen: $load15}
+            },
+            memory: {
+                total: $mem_total,
+                used: $mem_used,
+                available: $mem_available,
+                percent: $mem_percent
+            },
+            uptime: {
+                seconds: $uptime_seconds,
+                days: $uptime_days,
+                hours: $uptime_hours,
+                minutes: $uptime_minutes
+            },
+            disk: {
+                root: $disk_root,
+                mounts: $disks
+            },
+            top_processes: $top_processes
+        }'
+}
+
 cmd_install_stack_base() {
     run_script_api install-stack-base
 }
@@ -267,6 +359,59 @@ cmd_cloudflare_status() {
 
 cmd_cloudflare_login_start() {
     run_script_api cloudflare-login-start
+}
+
+cmd_github_config_status() {
+    run_script_api github-config-status
+}
+
+cmd_github_config_set() {
+    local username="${1:-}"
+    local token="${2:-}"
+    local author_name="${3:-}"
+    local author_email="${4:-}"
+
+    [[ -n "$username" ]] || err "usuario do GitHub obrigatorio"
+    [[ -n "$token" ]] || err "token do GitHub obrigatorio"
+    [[ -n "$author_name" ]] || err "nome do autor obrigatorio"
+    [[ -n "$author_email" ]] || err "email do autor obrigatorio"
+    run_script_api github-config-set "$username" "$token" "$author_name" "$author_email"
+}
+
+cmd_github_config_clear() {
+    run_script_api github-config-clear
+}
+
+cmd_github_site_status() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api github-site-status "$user"
+}
+
+cmd_github_site_clone() {
+    local user="${1:-}"
+    local repo_slug="${2:-}"
+    local branch="${3:-}"
+    local clean_target="${4:-0}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ -n "$repo_slug" ]] || err "repositorio GitHub obrigatorio"
+    run_script_api github-site-clone "$user" "$repo_slug" "$branch" "$clean_target"
+}
+
+cmd_github_site_pull() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api github-site-pull "$user"
+}
+
+cmd_github_site_commit_push() {
+    local user="${1:-}"
+    local commit_msg="${2:-}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ -n "$commit_msg" ]] || err "mensagem de commit obrigatoria"
+    run_script_api github-site-commit-push "$user" "$commit_msg"
 }
 
 cmd_suspend_site() {
@@ -515,6 +660,7 @@ main() {
     case "$cmd" in
         list-sites) cmd_list_sites ;;
         service-status) cmd_service_status ;;
+        server-metrics) cmd_server_metrics ;;
         restart-services) cmd_restart_services ;;
         install-stack-base) cmd_install_stack_base ;;
         configure-phpmyadmin-domain)
@@ -551,6 +697,28 @@ main() {
             ;;
         cloudflare-status) cmd_cloudflare_status ;;
         cloudflare-login-start) cmd_cloudflare_login_start ;;
+        github-config-status) cmd_github_config_status ;;
+        github-config-set)
+            [[ $# -ge 4 ]] || err "uso: github-config-set <usuario> <token> <autor_nome> <autor_email>"
+            cmd_github_config_set "$1" "$2" "$3" "$4"
+            ;;
+        github-config-clear) cmd_github_config_clear ;;
+        github-site-status)
+            [[ $# -ge 1 ]] || err "uso: github-site-status <site_user>"
+            cmd_github_site_status "$1"
+            ;;
+        github-site-clone)
+            [[ $# -ge 2 ]] || err "uso: github-site-clone <site_user> <owner/repo> [branch] [limpar_destino:0|1]"
+            cmd_github_site_clone "$1" "$2" "${3:-}" "${4:-0}"
+            ;;
+        github-site-pull)
+            [[ $# -ge 1 ]] || err "uso: github-site-pull <site_user>"
+            cmd_github_site_pull "$1"
+            ;;
+        github-site-commit-push)
+            [[ $# -ge 2 ]] || err "uso: github-site-commit-push <site_user> <mensagem_commit>"
+            cmd_github_site_commit_push "$1" "$2"
+            ;;
         suspend-site)
             [[ $# -eq 1 ]] || err "uso: suspend-site <user>"
             cmd_suspend_site "$1"
