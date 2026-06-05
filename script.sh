@@ -472,6 +472,16 @@ github_email_primario_por_token() {
     echo "$payload" | jq -r 'map(select(.primary == true and .verified == true)) | .[0].email // empty'
 }
 
+github_api_payload_error_message() {
+    local payload="${1:-}"
+    local message=""
+
+    [[ -n "$payload" ]] || return 1
+    message="$(echo "$payload" | jq -r '.error_description // .message // .error // empty' 2>/dev/null)"
+    [[ -n "$message" ]] || return 1
+    printf '%s\n' "$message"
+}
+
 github_git_exec_por_usuario() {
     local user="${1:-}"
     local usar_auth="${2:-0}"
@@ -3987,6 +3997,7 @@ api_github_device_flow_iniciar() {
     local client_id=""
     local scopes
     local payload device_code user_code verification_uri expires_in interval expires_at
+    local http_code tmp_body payload_error
 
     scopes="$(github_oauth_scopes_padrao)"
     github_config_ler || true
@@ -3998,17 +4009,37 @@ api_github_device_flow_iniciar() {
         return 1
     fi
 
-    payload="$(curl -fsSL \
-        -H 'Accept: application/json' \
-        -d "client_id=${client_id}" \
-        --data-urlencode "scope=${scopes}" \
-        https://github.com/login/device/code 2>/dev/null)" || {
-        api_json_erro "Falha ao iniciar autorizacao com o GitHub."
+    tmp_body="$(mktemp)" || {
+        api_json_erro "Falha ao preparar requisicao para o GitHub."
         return 1
     }
 
+    http_code="$(curl -sS -L \
+        -H 'Accept: application/json' \
+        -o "$tmp_body" \
+        -w '%{http_code}' \
+        -d "client_id=${client_id}" \
+        --data-urlencode "scope=${scopes}" \
+        https://github.com/login/device/code 2>/dev/null)" || {
+        rm -f "$tmp_body"
+        api_json_erro "Falha ao iniciar autorizacao com o GitHub."
+        return 1
+    }
+    payload="$(cat "$tmp_body" 2>/dev/null || true)"
+    rm -f "$tmp_body"
+
+    if [[ ! "$http_code" =~ ^2 ]]; then
+        payload_error="$(github_api_payload_error_message "$payload" || true)"
+        if [[ -n "$payload_error" ]]; then
+            api_json_erro "$payload_error"
+        else
+            api_json_erro "GitHub retornou HTTP ${http_code} ao iniciar autorizacao."
+        fi
+        return 1
+    fi
+
     if [[ "$(echo "$payload" | jq -r '.error // empty' 2>/dev/null)" != "" ]]; then
-        api_json_erro "$(echo "$payload" | jq -r '.error_description // .error')"
+        api_json_erro "$(github_api_payload_error_message "$payload" || echo 'Falha ao iniciar autorizacao com o GitHub.')"
         return 1
     fi
 
@@ -4035,6 +4066,7 @@ api_github_device_flow_iniciar() {
 api_github_device_flow_verificar() {
     local poll_now="${1:-0}"
     local payload error_code access_token user_payload username author_name author_email
+    local http_code tmp_body payload_error
 
     if ! github_device_flow_ler; then
         api_json_erro "Nenhuma autorizacao pendente do GitHub encontrada."
@@ -4051,15 +4083,35 @@ api_github_device_flow_verificar() {
         return 0
     fi
 
-    payload="$(curl -fsSL \
+    tmp_body="$(mktemp)" || {
+        api_json_erro "Falha ao preparar verificacao da autorizacao do GitHub."
+        return 1
+    }
+
+    http_code="$(curl -sS -L \
         -H 'Accept: application/json' \
+        -o "$tmp_body" \
+        -w '%{http_code}' \
         -d "client_id=${GITHUB_DEVICE_CLIENT_ID_VALUE}" \
         -d "device_code=${GITHUB_DEVICE_CODE_VALUE}" \
         -d 'grant_type=urn:ietf:params:oauth:grant-type:device_code' \
         https://github.com/login/oauth/access_token 2>/dev/null)" || {
+        rm -f "$tmp_body"
         api_json_erro "Falha ao consultar autorizacao pendente do GitHub."
         return 1
     }
+    payload="$(cat "$tmp_body" 2>/dev/null || true)"
+    rm -f "$tmp_body"
+
+    if [[ ! "$http_code" =~ ^2 ]]; then
+        payload_error="$(github_api_payload_error_message "$payload" || true)"
+        if [[ -n "$payload_error" ]]; then
+            api_json_erro "$payload_error"
+        else
+            api_json_erro "GitHub retornou HTTP ${http_code} ao verificar autorizacao."
+        fi
+        return 1
+    fi
 
     error_code="$(echo "$payload" | jq -r '.error // empty' 2>/dev/null)"
     if [[ -n "$error_code" ]]; then
