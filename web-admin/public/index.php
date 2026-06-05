@@ -507,11 +507,14 @@ if (!$authed) {
     exit;
 }
 
-$tab = (string) ($_GET['tab'] ?? 'dashboard');
+$requestedTab = (string) ($_GET['tab'] ?? ($_POST['return_tab'] ?? 'dashboard'));
+$tab = $requestedTab;
 $allowedTabs = ['dashboard', 'sites', 'files', 'database', 'system'];
 if (!in_array($tab, $allowedTabs, true)) {
     $tab = 'dashboard';
 }
+
+$actionResult = null;
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== '') {
@@ -820,6 +823,264 @@ try {
 
             redirectTo(baseUrl(['tab' => 'files', 'site' => $siteUser, 'path' => $currentPath]));
         }
+
+        if ($action === 'stack_install_base') {
+            $tab = 'system';
+            [$code, $out, $stderr] = panelExec(['install-stack-base']);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $details = ['OpenLiteSpeed panel: ' . (string) ($payload['panel_url'] ?? 'http://localhost:7080')];
+                if (($payload['phpmyadmin'] ?? 'ok') !== 'ok') {
+                    $details[] = 'phpMyAdmin reported a warning during installation.';
+                }
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Stack base instalada',
+                    'text' => 'Repositorios e servicos principais foram processados.',
+                    'details' => $details,
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao instalar stack base',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'cloudflare_login_start') {
+            $tab = 'system';
+            [$code, $out, $stderr] = panelExec(['cloudflare-login-start']);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $authenticated = !empty($payload['authenticated']);
+                $details = [];
+                $title = 'Status do Cloudflare';
+                $text = $authenticated
+                    ? 'Cloudflare ja autenticado para criacao de tunnels.'
+                    : 'Fluxo de login do Cloudflare iniciado.';
+
+                $loginUrl = (string) ($payload['login_url'] ?? '');
+                $logFile = (string) ($payload['log_file'] ?? '');
+                if ($loginUrl !== '') {
+                    $details[] = 'Abra a URL de autorizacao: ' . $loginUrl;
+                }
+                if ($logFile !== '') {
+                    $details[] = 'Log do processo: ' . $logFile;
+                }
+
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => $title,
+                    'text' => $text,
+                    'details' => $details,
+                    'pre' => (string) ($payload['log_excerpt'] ?? ''),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao iniciar login do Cloudflare',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'ols_set_admin_password') {
+            $tab = 'system';
+            $adminUser = trim((string) ($_POST['ols_admin_user'] ?? 'admin'));
+            $adminPass = (string) ($_POST['ols_admin_password'] ?? '');
+            $adminPassConfirm = (string) ($_POST['ols_admin_password_confirm'] ?? '');
+
+            if ($adminUser === '' || preg_match('/^[a-zA-Z0-9._-]{1,32}$/', $adminUser) !== 1) {
+                throw new RuntimeException('Usuario do OLS invalido.');
+            }
+            if ($adminPass === '' || strlen($adminPass) < 8) {
+                throw new RuntimeException('A senha do OLS deve ter ao menos 8 caracteres.');
+            }
+            if (!hash_equals($adminPass, $adminPassConfirm)) {
+                throw new RuntimeException('A confirmacao da senha do OLS nao confere.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['ols-set-admin', $adminUser, $adminPass]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Credenciais do OLS atualizadas',
+                    'text' => 'Usuario atualizado: ' . (string) ($payload['user'] ?? $adminUser),
+                    'pre' => (string) ($payload['output'] ?? ''),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao atualizar credenciais do OLS',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'panel_configure_domain') {
+            $tab = 'system';
+            $domain = sanitizeDomainInput((string) ($_POST['panel_domain'] ?? ''));
+            $createTunnel = !empty($_POST['panel_create_tunnel']) ? '1' : '0';
+
+            if ($domain === '') {
+                throw new RuntimeException('Dominio invalido para o painel web.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['configure-panel-domain', $domain, $createTunnel]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Dominio do painel configurado',
+                    'text' => 'Painel publicado em https://' . (string) ($payload['domain'] ?? $domain),
+                    'details' => [
+                        'Usuario: ' . (string) (($payload['login']['user'] ?? '') ?: 'admin'),
+                        'Senha: ' . (string) (($payload['login']['pass'] ?? '') ?: '-'),
+                        'Arquivo de credenciais: ' . (string) ($payload['credentials_file'] ?? ''),
+                        'Tunnel: ' . (string) ($payload['tunnel'] ?? 'nao_solicitado'),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao configurar dominio do painel',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'phpmyadmin_configure_domain') {
+            $tab = 'database';
+            $domain = sanitizeDomainInput((string) ($_POST['phpmyadmin_domain'] ?? ''));
+            $removeOthers = !empty($_POST['phpmyadmin_remove_others']) ? '1' : '0';
+            $createTunnel = !empty($_POST['phpmyadmin_create_tunnel']) ? '1' : '0';
+
+            if ($domain === '') {
+                throw new RuntimeException('Dominio invalido para o phpMyAdmin.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['configure-phpmyadmin-domain', $domain, $removeOthers, $createTunnel]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'phpMyAdmin configurado',
+                    'text' => 'Acesso publicado em https://' . (string) ($payload['domain'] ?? $domain),
+                    'details' => [
+                        'Usuario dedicado: ' . (string) ($payload['user'] ?? 'phpmyadmin_srv'),
+                        'Tunnel: ' . (string) ($payload['tunnel'] ?? 'nao_solicitado'),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao configurar phpMyAdmin',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'db_rotate_password') {
+            $tab = 'database';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para trocar senha do banco.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['db-rotate-password', $siteUser]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Senha do banco atualizada',
+                    'details' => [
+                        'Site: ' . (string) ($payload['site_user'] ?? $siteUser),
+                        'Usuario do banco: ' . (string) ($payload['db_user'] ?? ''),
+                        'Nova senha: ' . (string) ($payload['new_password'] ?? ''),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao trocar senha do banco',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'wordpress_fix_permalink') {
+            $tab = 'system';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para corrigir permalink.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['wordpress-fix-permalink', $siteUser]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Permalink do WordPress corrigido',
+                    'text' => 'Site: ' . (string) ($payload['domain'] ?? $siteUser),
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao corrigir permalink do WordPress',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'site_fix_rewrite') {
+            $tab = 'system';
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            $frontController = trim((string) ($_POST['front_controller'] ?? 'index.php'));
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para corrigir rewrite.');
+            }
+            if ($frontController === '' || preg_match('/^[a-zA-Z0-9._\/-]+$/', $frontController) !== 1) {
+                throw new RuntimeException('Front controller invalido.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-fix-rewrite', $siteUser, $frontController]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Rewrite padrao aplicado',
+                    'details' => [
+                        'Site: ' . (string) ($payload['domain'] ?? $siteUser),
+                        'Front controller: ' . (string) ($payload['front_controller'] ?? $frontController),
+                        '.htaccess: ' . (string) ($payload['htaccess'] ?? ''),
+                    ],
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao corrigir rewrite',
+                    'text' => $detail,
+                ];
+            }
+        }
     }
 } catch (Throwable $e) {
     setFlash('error', $e->getMessage());
@@ -901,6 +1162,46 @@ if ($tab === 'system' && $cronSite !== '') {
         }
     } else {
         $cronReadError = $err;
+    }
+}
+
+$cloudflareStatus = [];
+if ($tab === 'system') {
+    [$code, $out, $err] = panelExec(['cloudflare-status']);
+    if ($code === 0) {
+        $cloudflareStatus = decodeJson($out);
+    } else {
+        $cloudflareStatus = ['ok' => false, 'error' => $err];
+    }
+}
+
+$diagnosticSite = sanitizeSiteUser((string) ($_GET['diag_site'] ?? ''));
+if ($diagnosticSite === '' && isset($fileSites[0]['user'])) {
+    $diagnosticSite = (string) $fileSites[0]['user'];
+}
+
+$diagnosticLinesRaw = trim((string) ($_GET['diag_lines'] ?? '80'));
+$diagnosticLines = preg_match('/^[0-9]+$/', $diagnosticLinesRaw) === 1 ? $diagnosticLinesRaw : '80';
+$diagnosticAction = (string) ($_GET['diag_action'] ?? '');
+$diagnosticLog = null;
+$diagnosticHtaccess = null;
+$diagnosticError = '';
+
+if ($tab === 'system' && $diagnosticSite !== '' && $diagnosticAction === 'log') {
+    [$code, $out, $err] = panelExec(['site-error-log', $diagnosticSite, $diagnosticLines]);
+    if ($code === 0) {
+        $diagnosticLog = decodeJson($out);
+    } else {
+        $diagnosticError = $err;
+    }
+}
+
+if ($tab === 'system' && $diagnosticSite !== '' && $diagnosticAction === 'htaccess') {
+    [$code, $out, $err] = panelExec(['htaccess-verify', $diagnosticSite]);
+    if ($code === 0) {
+        $diagnosticHtaccess = decodeJson($out);
+    } else {
+        $diagnosticError = $err;
     }
 }
 
@@ -1003,6 +1304,21 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
       <?php if ($flash): ?>
         <div class="mb-5 rounded-xl border px-4 py-3 text-sm <?= h(flashUiClass((string) ($flash['type'] ?? 'error'))) ?>">
           <?= h((string) ($flash['text'] ?? 'Falha inesperada.')) ?>
+        </div>
+      <?php endif; ?>
+
+      <?php if (is_array($actionResult)): ?>
+        <div class="mb-5 rounded-xl border px-4 py-3 text-sm <?= h(flashUiClass((string) ($actionResult['type'] ?? 'error'))) ?>">
+          <p class="font-semibold"><?= h((string) ($actionResult['title'] ?? 'Resultado')) ?></p>
+          <?php if (($actionResult['text'] ?? '') !== ''): ?>
+            <p class="mt-1"><?= h((string) $actionResult['text']) ?></p>
+          <?php endif; ?>
+          <?php foreach (($actionResult['details'] ?? []) as $detail): ?>
+            <p class="mt-1 font-mono text-xs break-all"><?= h((string) $detail) ?></p>
+          <?php endforeach; ?>
+          <?php if (($actionResult['pre'] ?? '') !== ''): ?>
+            <pre class="mt-3 overflow-x-auto rounded-lg bg-white/60 p-3 font-mono text-xs text-slate-800"><?= h((string) $actionResult['pre']) ?></pre>
+          <?php endif; ?>
         </div>
       <?php endif; ?>
 
@@ -1317,22 +1633,47 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
       <?php if ($tab === 'database'): ?>
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
           <h3 class="font-display text-xl font-semibold text-slate-900">Acesso ao banco de dados</h3>
-          <p class="mt-2 text-sm text-slate-600">Gerencie bancos pelo phpMyAdmin e crie bancos adicionais por site direto aqui.</p>
+          <p class="mt-2 text-sm text-slate-600">Abra o phpMyAdmin, publique o dominio dele e gerencie credenciais dos bancos principais e adicionais.</p>
 
-          <div class="mt-4 grid gap-4 lg:grid-cols-2">
+          <div class="mt-4 grid gap-4 xl:grid-cols-3">
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h4 class="font-display text-lg font-semibold text-slate-900">phpMyAdmin</h4>
               <p class="mt-1 text-sm text-slate-600">Acesso visual aos bancos do servidor.</p>
               <?php if ($phpmyadminDomain !== ''): ?>
                 <a href="<?= h('https://' . $phpmyadminDomain) ?>" target="_blank" rel="noopener" class="mt-3 inline-flex items-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Abrir phpMyAdmin (<?= h($phpmyadminDomain) ?>)</a>
               <?php else: ?>
-                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Dominio do phpMyAdmin nao encontrado. Configure no instalador.</div>
+                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Dominio do phpMyAdmin nao encontrado.</div>
               <?php endif; ?>
+
+              <form method="post" class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                <h5 class="font-semibold text-slate-900">Publicar dominio do phpMyAdmin</h5>
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="phpmyadmin_configure_domain">
+                <input type="hidden" name="return_tab" value="database">
+
+                <div class="mt-3">
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Dominio</label>
+                  <input name="phpmyadmin_domain" value="<?= h($phpmyadminDomain !== '' ? $phpmyadminDomain : 'db.i3lab.site') ?>" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                </div>
+
+                <div class="mt-3 space-y-2 text-sm text-slate-700">
+                  <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="phpmyadmin_remove_others" value="1" checked class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                    Remover /phpmyadmin dos demais sites
+                  </label>
+                  <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="phpmyadmin_create_tunnel" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                    Criar tunnel Cloudflare
+                  </label>
+                </div>
+
+                <button type="submit" class="mt-4 w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Configurar phpMyAdmin</button>
+              </form>
             </div>
 
             <form method="post" class="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h4 class="font-display text-lg font-semibold text-slate-900">Criar banco adicional</h4>
-              <p class="mt-1 text-sm text-slate-600">Cria banco + usuário para um site existente.</p>
+              <p class="mt-1 text-sm text-slate-600">Cria banco + usuario para um site existente.</p>
               <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
               <input type="hidden" name="action" value="db_create_additional">
 
@@ -1352,6 +1693,26 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
               </div>
 
               <button type="submit" class="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">Criar banco adicional</button>
+            </form>
+
+            <form method="post" class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Trocar senha do banco principal</h4>
+              <p class="mt-1 text-sm text-slate-600">Gera uma nova senha para o banco principal do site e tenta atualizar o .env automaticamente.</p>
+              <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+              <input type="hidden" name="action" value="db_rotate_password">
+              <input type="hidden" name="return_tab" value="database">
+
+              <div class="mt-3">
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                <select name="site_user" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                  <?php foreach ($fileSites as $site): ?>
+                    <?php $user = (string) ($site['user'] ?? ''); ?>
+                    <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+
+              <button type="submit" class="mt-3 w-full rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-600">Gerar nova senha</button>
             </form>
           </div>
         </section>
@@ -1391,6 +1752,226 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
                 <?php endforeach; ?>
               </tbody>
             </table>
+          </div>
+
+          <div class="mt-5 grid gap-5 xl:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Instalacao base</h4>
+              <p class="mt-1 text-sm text-slate-600">Executa a rotina inicial para preparar os componentes principais do servidor.</p>
+              <form method="post" class="mt-4">
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="stack_install_base">
+                <input type="hidden" name="return_tab" value="system">
+                <button type="submit" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Instalar stack base</button>
+              </form>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h4 class="font-display text-lg font-semibold text-slate-900">Cloudflare Tunnel</h4>
+                  <p class="mt-1 text-sm text-slate-600">Autentique a conta e acompanhe o status antes de publicar sites com tunnel.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($cloudflareStatus['authenticated']) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700' ?>">
+                    <?= !empty($cloudflareStatus['authenticated']) ? 'Autenticado' : 'Nao autenticado' ?>
+                  </span>
+                  <?php if (!empty($cloudflareStatus['login_running'])): ?>
+                    <span class="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">Login em andamento</span>
+                  <?php endif; ?>
+                </div>
+              </div>
+
+              <?php if (($cloudflareStatus['error'] ?? '') !== ''): ?>
+                <div class="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h((string) $cloudflareStatus['error']) ?></div>
+              <?php endif; ?>
+
+              <div class="mt-4 flex flex-wrap gap-3">
+                <form method="post">
+                  <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                  <input type="hidden" name="action" value="cloudflare_login_start">
+                  <input type="hidden" name="return_tab" value="system">
+                  <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Iniciar login</button>
+                </form>
+                <?php if (($cloudflareStatus['login_url'] ?? '') !== ''): ?>
+                  <a href="<?= h((string) $cloudflareStatus['login_url']) ?>" target="_blank" rel="noreferrer" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100">Abrir URL de autorizacao</a>
+                <?php endif; ?>
+              </div>
+
+              <?php if (($cloudflareStatus['log_file'] ?? '') !== ''): ?>
+                <p class="mt-3 text-xs text-slate-500">Log: <?= h((string) $cloudflareStatus['log_file']) ?></p>
+              <?php endif; ?>
+
+              <?php if (($cloudflareStatus['log_excerpt'] ?? '') !== ''): ?>
+                <pre class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs text-slate-800"><?= h((string) $cloudflareStatus['log_excerpt']) ?></pre>
+              <?php endif; ?>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Dominio do painel</h4>
+              <p class="mt-1 text-sm text-slate-600">Publica o webpanel com dominio proprio e opcionalmente cria o tunnel.</p>
+              <form method="post" class="mt-4 space-y-3">
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="panel_configure_domain">
+                <input type="hidden" name="return_tab" value="system">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Dominio</label>
+                  <input type="text" name="panel_domain" value="<?= h($panelDomain !== '' ? $panelDomain : 'panel.i3lab.site') ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="panel.seudominio.com">
+                </div>
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" name="panel_create_tunnel" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                  Criar tunnel Cloudflare para o painel
+                </label>
+                <button type="submit" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Configurar painel</button>
+              </form>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">OpenLiteSpeed Admin</h4>
+              <p class="mt-1 text-sm text-slate-600">Atualize o usuario e a senha do painel administrativo do OpenLiteSpeed.</p>
+              <form method="post" class="mt-4 grid gap-3">
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="ols_set_admin_password">
+                <input type="hidden" name="return_tab" value="system">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Usuario</label>
+                  <input type="text" name="ols_admin_user" value="admin" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Nova senha</label>
+                  <input type="password" name="ols_admin_password" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Confirmar senha</label>
+                  <input type="password" name="ols_admin_password_confirm" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                </div>
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Salvar credenciais</button>
+              </form>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-5 xl:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Diagnostico de logs</h4>
+              <p class="mt-1 text-sm text-slate-600">Leia o fim do `error.log` de um site para identificar falhas de PHP, permissao ou rewrite.</p>
+              <form method="get" class="mt-4 grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+                <input type="hidden" name="tab" value="system">
+                <input type="hidden" name="diag_action" value="log">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                  <select name="diag_site" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                    <?php foreach ($fileSites as $site): ?>
+                      <?php $user = (string) ($site['user'] ?? ''); ?>
+                      <option value="<?= h($user) ?>" <?= $user === $diagnosticSite ? 'selected' : '' ?>><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Linhas</label>
+                  <input type="number" min="10" max="500" name="diag_lines" value="<?= h($diagnosticLines) ?>" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                </div>
+                <div class="flex items-end">
+                  <button type="submit" class="rounded-xl bg-slate-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">Ver log</button>
+                </div>
+              </form>
+
+              <?php if ($diagnosticAction === 'log' && $diagnosticLog !== null): ?>
+                <div class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="font-semibold text-slate-900"><?= h((string) ($diagnosticLog['domain'] ?? $diagnosticSite)) ?></span>
+                    <?php if (($diagnosticLog['file'] ?? '') !== ''): ?>
+                      <span class="text-slate-500"><?= h((string) $diagnosticLog['file']) ?></span>
+                    <?php endif; ?>
+                  </div>
+                  <pre class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-slate-950 p-3 font-mono text-xs text-slate-100"><?= h((string) ($diagnosticLog['content'] ?? 'Sem conteudo retornado.')) ?></pre>
+                </div>
+              <?php endif; ?>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Verificacao de rewrite e .htaccess</h4>
+              <p class="mt-1 text-sm text-slate-600">Confere o vhost, o autoload do `.htaccess` e mostra um relatorio rapido do site selecionado.</p>
+              <form method="get" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input type="hidden" name="tab" value="system">
+                <input type="hidden" name="diag_action" value="htaccess">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                  <select name="diag_site" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                    <?php foreach ($fileSites as $site): ?>
+                      <?php $user = (string) ($site['user'] ?? ''); ?>
+                      <option value="<?= h($user) ?>" <?= $user === $diagnosticSite ? 'selected' : '' ?>><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div class="flex items-end">
+                  <button type="submit" class="rounded-xl bg-slate-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">Verificar</button>
+                </div>
+              </form>
+
+              <?php if ($diagnosticAction === 'htaccess' && $diagnosticHtaccess !== null): ?>
+                <div class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <span class="font-semibold text-slate-900"><?= h((string) ($diagnosticHtaccess['domain'] ?? $diagnosticSite)) ?></span>
+                    <span class="rounded-full px-2.5 py-1 text-xs font-semibold <?= !empty($diagnosticHtaccess['healthy']) ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700' ?>">
+                      <?= !empty($diagnosticHtaccess['healthy']) ? 'Saudavel' : 'Revisar configuracao' ?>
+                    </span>
+                  </div>
+                  <pre class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs text-slate-800"><?= h((string) ($diagnosticHtaccess['content'] ?? 'Sem relatorio retornado.')) ?></pre>
+                </div>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <?php if ($diagnosticError !== ''): ?>
+            <div class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><?= h($diagnosticError) ?></div>
+          <?php endif; ?>
+
+          <div class="mt-5 grid gap-5 xl:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Corrigir permalink WordPress</h4>
+              <p class="mt-1 text-sm text-slate-600">Reaplica o bloco de rewrite do WordPress e reinicia o OpenLiteSpeed.</p>
+              <form method="post" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="wordpress_fix_permalink">
+                <input type="hidden" name="return_tab" value="system">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site WordPress</label>
+                  <select name="site_user" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                    <?php foreach ($fileSites as $site): ?>
+                      <?php $user = (string) ($site['user'] ?? ''); ?>
+                      <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div class="flex items-end">
+                  <button type="submit" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">Corrigir permalink</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h4 class="font-display text-lg font-semibold text-slate-900">Corrigir rewrite padrao</h4>
+              <p class="mt-1 text-sm text-slate-600">Aplica um `.htaccess` generico para apps sem WordPress usando um front controller.</p>
+              <form method="post" class="mt-4 grid gap-3">
+                <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+                <input type="hidden" name="action" value="site_fix_rewrite">
+                <input type="hidden" name="return_tab" value="system">
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                  <select name="site_user" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                    <?php foreach ($fileSites as $site): ?>
+                      <?php $user = (string) ($site['user'] ?? ''); ?>
+                      <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Front controller</label>
+                  <input type="text" name="front_controller" value="index.php" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="public/index.php">
+                </div>
+                <button type="submit" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Aplicar rewrite</button>
+              </form>
+            </div>
           </div>
 
           <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
