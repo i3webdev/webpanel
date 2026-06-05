@@ -347,11 +347,41 @@ phpmyadmin_origem_dir() {
     return 1
 }
 
+dominio_padrao_phpmyadmin() {
+    local dominio_padrao
+    dominio_padrao="$(normalizar_dominio "db")"
+    if validar_dominio "$dominio_padrao"; then
+        echo "$dominio_padrao"
+        return 0
+    fi
+
+    return 1
+}
+
 instalar_phpmyadmin() {
     msg "Instalando phpMyAdmin..."
 
-    if ! rpm -q phpMyAdmin >/dev/null 2>&1; then
-        if ! dnf install -y phpMyAdmin; then
+    local -a pacotes_phpmyadmin=("phpMyAdmin" "phpmyadmin")
+    local pacote
+    local instalado=0
+
+    for pacote in "${pacotes_phpmyadmin[@]}"; do
+        if rpm -q "$pacote" >/dev/null 2>&1; then
+            instalado=1
+            break
+        fi
+    done
+
+    if [[ $instalado -ne 1 ]]; then
+        local instalou=0
+        for pacote in "${pacotes_phpmyadmin[@]}"; do
+            if dnf install -y "$pacote"; then
+                instalou=1
+                break
+            fi
+        done
+
+        if [[ $instalou -ne 1 ]]; then
             erro "Falha ao instalar phpMyAdmin."
             return 1
         fi
@@ -401,7 +431,14 @@ configurar_phpmyadmin_dominio_principal() {
     titulo
 
     local dominio
-    read -rp "Domínio principal do phpMyAdmin (ex: db.seudominio.com): " dominio
+    local dominio_padrao
+    dominio_padrao="$(dominio_padrao_phpmyadmin || true)"
+    if [[ -n "$dominio_padrao" ]]; then
+        read -rp "Domínio principal do phpMyAdmin (ENTER para ${dominio_padrao}): " dominio
+        dominio="${dominio:-$dominio_padrao}"
+    else
+        read -rp "Domínio principal do phpMyAdmin (ex: db.seudominio.com): " dominio
+    fi
     dominio="$(normalizar_dominio "$dominio")"
     if ! validar_dominio "$dominio"; then
         erro "Domínio inválido."
