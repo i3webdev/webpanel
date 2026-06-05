@@ -28,9 +28,12 @@ WEB_PANEL_API_SCRIPT="${WEB_PANEL_INSTALL_DIR}/script.sh"
 WEB_PANEL_HELPER_BIN="/usr/local/sbin/ultra-panel-helper"
 WEB_PANEL_SUDOERS_FILE="/etc/sudoers.d/ultra-panel-helper"
 WEB_PANEL_USER="painel_srv"
+GITHUB_PANEL_CONFIG_DIR="/root/.ultra-panel"
+GITHUB_PANEL_CONFIG_FILE="${GITHUB_PANEL_CONFIG_DIR}/github.env"
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$CLOUDFLARE_BASE_DIR"
+mkdir -p "$GITHUB_PANEL_CONFIG_DIR"
 
 cor_verde="\033[1;32m"
 cor_amarela="\033[1;33m"
@@ -231,6 +234,155 @@ bool_sim() {
     local valor
     valor="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
     [[ "$valor" == "1" || "$valor" == "s" || "$valor" == "sim" || "$valor" == "true" || "$valor" == "yes" || "$valor" == "y" ]]
+}
+
+github_repo_slug_valido() {
+    local slug="${1:-}"
+    [[ "$slug" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]
+}
+
+github_branch_valida() {
+    local branch="${1:-}"
+    [[ -n "$branch" ]] || return 1
+    [[ "$branch" =~ ^[A-Za-z0-9._/-]{1,120}$ ]] || return 1
+    [[ "$branch" != *".."* && "$branch" != */ && "$branch" != /* ]]
+}
+
+github_username_valido() {
+    local username="${1:-}"
+    [[ "$username" =~ ^[A-Za-z0-9-]{1,39}$ ]]
+}
+
+github_email_valido() {
+    local email="${1:-}"
+    [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+}
+
+github_autor_nome_valido() {
+    local name="${1:-}"
+    [[ -n "$name" && ${#name} -le 80 && "$name" != *$'\n'* && "$name" != *$'\r'* ]]
+}
+
+github_token_valido() {
+    local token="${1:-}"
+    [[ -n "$token" && ${#token} -ge 20 && "$token" != *$'\n'* && "$token" != *$'\r'* && "$token" != *[[:space:]]* ]]
+}
+
+github_commit_msg_valida() {
+    local msg_raw="${1:-}"
+    [[ -n "$msg_raw" && ${#msg_raw} -le 200 && "$msg_raw" != *$'\n'* && "$msg_raw" != *$'\r'* ]]
+}
+
+github_token_mask() {
+    local token="${1:-}"
+    local len="${#token}"
+    if (( len <= 8 )); then
+        printf '********'
+        return 0
+    fi
+    printf '%s****%s' "${token:0:4}" "${token: -4}"
+}
+
+github_repo_url_https() {
+    local slug="${1:-}"
+    printf 'https://github.com/%s.git' "$slug"
+}
+
+github_repo_dir_por_usuario() {
+    local user="${1:-}"
+    printf '%s/%s/public_html' "$SITES_ROOT" "$user"
+}
+
+github_config_carregar() {
+    [[ -f "$GITHUB_PANEL_CONFIG_FILE" ]] || return 1
+
+    GITHUB_CFG_USERNAME=""
+    GITHUB_CFG_TOKEN=""
+    GITHUB_CFG_AUTHOR_NAME=""
+    GITHUB_CFG_AUTHOR_EMAIL=""
+
+    # shellcheck disable=SC1090
+    source "$GITHUB_PANEL_CONFIG_FILE"
+
+    GITHUB_CFG_USERNAME="${GITHUB_USERNAME:-}"
+    GITHUB_CFG_TOKEN="${GITHUB_TOKEN:-}"
+    GITHUB_CFG_AUTHOR_NAME="${GITHUB_AUTHOR_NAME:-}"
+    GITHUB_CFG_AUTHOR_EMAIL="${GITHUB_AUTHOR_EMAIL:-}"
+
+    [[ -n "$GITHUB_CFG_USERNAME" && -n "$GITHUB_CFG_TOKEN" ]]
+}
+
+github_config_salvar() {
+    local username="${1:-}"
+    local token="${2:-}"
+    local author_name="${3:-}"
+    local author_email="${4:-}"
+
+    mkdir -p "$GITHUB_PANEL_CONFIG_DIR"
+    umask 077
+    cat > "$GITHUB_PANEL_CONFIG_FILE" <<EOF
+GITHUB_USERNAME=$(printf '%q' "$username")
+GITHUB_TOKEN=$(printf '%q' "$token")
+GITHUB_AUTHOR_NAME=$(printf '%q' "$author_name")
+GITHUB_AUTHOR_EMAIL=$(printf '%q' "$author_email")
+EOF
+    chmod 600 "$GITHUB_PANEL_CONFIG_FILE"
+}
+
+github_config_remover() {
+    rm -f "$GITHUB_PANEL_CONFIG_FILE"
+}
+
+github_git_exec_por_usuario() {
+    local user="${1:-}"
+    local usar_auth="${2:-0}"
+    shift 2 || true
+
+    local home_dir="${SITES_ROOT}/${user}"
+    local askpass=""
+    local -a cmd
+    cmd=(env "HOME=${home_dir}" "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" "GIT_TERMINAL_PROMPT=0")
+
+    if bool_sim "$usar_auth"; then
+        github_config_carregar || {
+            erro "Credenciais do GitHub nao configuradas."
+            return 1
+        }
+
+        askpass="$(mktemp)"
+        cat > "$askpass" <<'EOF'
+#!/bin/sh
+case "$1" in
+    *Username*|*username*) printf '%s\n' "${GITHUB_USERNAME:-}" ;;
+    *) printf '%s\n' "${GITHUB_TOKEN:-}" ;;
+esac
+EOF
+        chmod 755 "$askpass"
+        cmd+=("GIT_ASKPASS=${askpass}" "GITHUB_USERNAME=${GITHUB_CFG_USERNAME}" "GITHUB_TOKEN=${GITHUB_CFG_TOKEN}")
+    fi
+
+    local status=0
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$user" -- "${cmd[@]}" "$@" || status=$?
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo -u "$user" "${cmd[@]}" "$@" || status=$?
+    else
+        erro "Nem runuser nem sudo estao disponiveis para executar Git como o usuario do site."
+        status=1
+    fi
+
+    if [[ -n "$askpass" ]]; then
+        rm -f "$askpass"
+    fi
+
+    return "$status"
+}
+
+github_repo_existe_por_usuario() {
+    local user="${1:-}"
+    local repo_dir
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    [[ -d "${repo_dir}/.git" ]]
 }
 
 instalar_repos() {
@@ -3503,6 +3655,366 @@ api_cloudflare_login_start() {
     api_cloudflare_status
 }
 
+api_github_config_status() {
+    local configured="false"
+    local username=""
+    local author_name=""
+    local author_email=""
+    local token_masked=""
+
+    if github_config_carregar; then
+        configured="true"
+        username="$GITHUB_CFG_USERNAME"
+        author_name="$GITHUB_CFG_AUTHOR_NAME"
+        author_email="$GITHUB_CFG_AUTHOR_EMAIL"
+        token_masked="$(github_token_mask "$GITHUB_CFG_TOKEN")"
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --argjson configured "$configured" \
+            --arg username "$username" \
+            --arg author_name "$author_name" \
+            --arg author_email "$author_email" \
+            --arg token_masked "$token_masked" \
+            --arg config_file "$GITHUB_PANEL_CONFIG_FILE" \
+            '{ok:true,configured:$configured,username:$username,author_name:$author_name,author_email:$author_email,token_masked:$token_masked,config_file:$config_file}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
+api_github_config_salvar() {
+    local username="${1:-}"
+    local token="${2:-}"
+    local author_name="${3:-}"
+    local author_email="${4:-}"
+
+    if ! github_username_valido "$username"; then
+        api_json_erro "Usuario do GitHub invalido."
+        return 1
+    fi
+    if ! github_token_valido "$token"; then
+        api_json_erro "Token do GitHub invalido."
+        return 1
+    fi
+    if ! github_autor_nome_valido "$author_name"; then
+        api_json_erro "Nome do autor Git invalido."
+        return 1
+    fi
+    if ! github_email_valido "$author_email"; then
+        api_json_erro "Email do autor Git invalido."
+        return 1
+    fi
+
+    github_config_salvar "$username" "$token" "$author_name" "$author_email" || {
+        api_json_erro "Falha ao salvar configuracao do GitHub."
+        return 1
+    }
+
+    api_github_config_status
+}
+
+api_github_config_remover() {
+    github_config_remover
+    if command -v jq >/dev/null 2>&1; then
+        jq -n '{ok:true,configured:false}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
+api_github_status_repositorio_usuario() {
+    local user="${1:-}"
+
+    if ! command -v git >/dev/null 2>&1; then
+        api_json_erro "Git nao encontrado no servidor."
+        return 1
+    fi
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+
+    local repo_dir
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    local configured="false"
+    github_config_carregar && configured="true"
+
+    if [[ ! -d "${repo_dir}/.git" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            jq -n \
+                --arg user "$user" \
+                --arg path "$repo_dir" \
+                --argjson configured "$configured" \
+                '{ok:true,site_user:$user,path:$path,configured:$configured,repo_exists:false}'
+        else
+            echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+        fi
+        return 0
+    fi
+
+    local branch remote_url last_commit dirty_status counts ahead behind
+    branch="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    remote_url="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" remote get-url origin 2>/dev/null || true)"
+    last_commit="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" log -1 --pretty=format:%h\ %s 2>/dev/null || true)"
+    dirty_status="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" status --porcelain 2>/dev/null || true)"
+    counts="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-list --left-right --count @{upstream}...HEAD 2>/dev/null || true)"
+
+    ahead="0"
+    behind="0"
+    if [[ "$counts" =~ ^[0-9]+[[:space:]][0-9]+$ ]]; then
+        behind="${counts%% *}"
+        ahead="${counts##* }"
+    fi
+
+    local dirty="false"
+    [[ -n "$dirty_status" ]] && dirty="true"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg path "$repo_dir" \
+            --arg branch "$branch" \
+            --arg remote "$remote_url" \
+            --arg last_commit "$last_commit" \
+            --argjson configured "$configured" \
+            --argjson dirty "$dirty" \
+            --argjson ahead "$ahead" \
+            --argjson behind "$behind" \
+            '{ok:true,site_user:$user,path:$path,configured:$configured,repo_exists:true,branch:$branch,remote:$remote,dirty:$dirty,ahead:$ahead,behind:$behind,last_commit:$last_commit}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_github_clonar_repositorio_usuario() {
+    local user="${1:-}"
+    local repo_slug="${2:-}"
+    local branch="${3:-}"
+    local limpar_destino="${4:-0}"
+
+    if ! command -v git >/dev/null 2>&1; then
+        api_json_erro "Git nao encontrado no servidor."
+        return 1
+    fi
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+    if ! github_repo_slug_valido "$repo_slug"; then
+        api_json_erro "Repositorio GitHub invalido."
+        return 1
+    fi
+    if [[ -n "$branch" ]] && ! github_branch_valida "$branch"; then
+        api_json_erro "Branch invalida."
+        return 1
+    fi
+    github_config_carregar || {
+        api_json_erro "Credenciais do GitHub nao configuradas."
+        return 1
+    }
+
+    local repo_dir
+    local repo_url
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    repo_url="$(github_repo_url_https "$repo_slug")"
+
+    mkdir -p "$repo_dir"
+    chown "${user}:${user}" "$repo_dir" >/dev/null 2>&1 || true
+
+    if [[ -d "${repo_dir}/.git" ]]; then
+        api_json_erro "Esse site ja possui um repositorio Git inicializado."
+        return 1
+    fi
+
+    if find "$repo_dir" -mindepth 1 -maxdepth 1 | read -r _; then
+        if bool_sim "$limpar_destino"; then
+            find "$repo_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        else
+            api_json_erro "public_html nao esta vazio. Marque a opcao para limpar antes do clone."
+            return 1
+        fi
+    fi
+
+    local output
+    if [[ -n "$branch" ]]; then
+        output="$(github_git_exec_por_usuario "$user" 1 git clone --branch "$branch" --single-branch "$repo_url" "$repo_dir" 2>&1)" || {
+            api_json_erro "$output"
+            return 1
+        }
+    else
+        output="$(github_git_exec_por_usuario "$user" 1 git clone "$repo_url" "$repo_dir" 2>&1)" || {
+            api_json_erro "$output"
+            return 1
+        }
+    fi
+
+    if [[ -n "$GITHUB_CFG_AUTHOR_NAME" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.name "$GITHUB_CFG_AUTHOR_NAME" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$GITHUB_CFG_AUTHOR_EMAIL" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.email "$GITHUB_CFG_AUTHOR_EMAIL" >/dev/null 2>&1 || true
+    fi
+
+    local current_branch
+    current_branch="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg repo "$repo_slug" \
+            --arg path "$repo_dir" \
+            --arg branch "$current_branch" \
+            --arg output "$output" \
+            '{ok:true,site_user:$user,repo:$repo,path:$path,branch:$branch,output:$output}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_github_pull_repositorio_usuario() {
+    local user="${1:-}"
+
+    if ! command -v git >/dev/null 2>&1; then
+        api_json_erro "Git nao encontrado no servidor."
+        return 1
+    fi
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if ! github_repo_existe_por_usuario "$user"; then
+        api_json_erro "Repositorio Git nao encontrado nesse site."
+        return 1
+    fi
+    github_config_carregar || {
+        api_json_erro "Credenciais do GitHub nao configuradas."
+        return 1
+    }
+
+    local repo_dir branch output
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    branch="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [[ -n "$branch" ]] || branch="main"
+
+    output="$(github_git_exec_por_usuario "$user" 1 git -C "$repo_dir" pull --ff-only origin "$branch" 2>&1)" || {
+        api_json_erro "$output"
+        return 1
+    }
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg path "$repo_dir" \
+            --arg branch "$branch" \
+            --arg output "$output" \
+            '{ok:true,site_user:$user,path:$path,branch:$branch,output:$output}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_github_commit_push_usuario() {
+    local user="${1:-}"
+    local commit_msg="${2:-}"
+
+    if ! command -v git >/dev/null 2>&1; then
+        api_json_erro "Git nao encontrado no servidor."
+        return 1
+    fi
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if ! github_repo_existe_por_usuario "$user"; then
+        api_json_erro "Repositorio Git nao encontrado nesse site."
+        return 1
+    fi
+    if ! github_commit_msg_valida "$commit_msg"; then
+        api_json_erro "Mensagem de commit invalida."
+        return 1
+    fi
+    github_config_carregar || {
+        api_json_erro "Credenciais do GitHub nao configuradas."
+        return 1
+    }
+
+    local repo_dir branch current_name current_email commit_output push_output
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+
+    current_name="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config --get user.name 2>/dev/null || true)"
+    current_email="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config --get user.email 2>/dev/null || true)"
+
+    if [[ -n "$GITHUB_CFG_AUTHOR_NAME" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.name "$GITHUB_CFG_AUTHOR_NAME" >/dev/null 2>&1 || true
+        current_name="$GITHUB_CFG_AUTHOR_NAME"
+    fi
+    if [[ -n "$GITHUB_CFG_AUTHOR_EMAIL" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.email "$GITHUB_CFG_AUTHOR_EMAIL" >/dev/null 2>&1 || true
+        current_email="$GITHUB_CFG_AUTHOR_EMAIL"
+    fi
+
+    if [[ -z "$current_name" || -z "$current_email" ]]; then
+        api_json_erro "Autor Git nao configurado. Salve nome e email do autor nas credenciais do GitHub."
+        return 1
+    fi
+
+    github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" add -A >/dev/null 2>&1 || {
+        api_json_erro "Falha ao preparar alteracoes para commit."
+        return 1
+    }
+
+    if github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" diff --cached --quiet --ignore-submodules -- >/dev/null 2>&1; then
+        if command -v jq >/dev/null 2>&1; then
+            jq -n \
+                --arg user "$user" \
+                --arg path "$repo_dir" \
+                '{ok:true,site_user:$user,path:$path,no_changes:true}'
+        else
+            echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+        fi
+        return 0
+    fi
+
+    commit_output="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" commit -m "$commit_msg" 2>&1)" || {
+        api_json_erro "$commit_output"
+        return 1
+    }
+
+    branch="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [[ -n "$branch" ]] || branch="main"
+
+    push_output="$(github_git_exec_por_usuario "$user" 1 git -C "$repo_dir" push origin "$branch" 2>&1)" || {
+        api_json_erro "$push_output"
+        return 1
+    }
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg path "$repo_dir" \
+            --arg branch "$branch" \
+            --arg commit_output "$commit_output" \
+            --arg push_output "$push_output" \
+            '{ok:true,site_user:$user,path:$path,branch:$branch,commit_output:$commit_output,push_output:$push_output,no_changes:false}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
 api_main() {
     local cmd="${1:-}"
     shift || true
@@ -3576,6 +4088,32 @@ api_main() {
             ;;
         cloudflare-login-start)
             api_cloudflare_login_start
+            ;;
+        github-config-status)
+            api_github_config_status
+            ;;
+        github-config-set)
+            [[ $# -ge 4 ]] || { api_json_erro "uso: __api github-config-set <usuario> <token> <autor_nome> <autor_email>"; return 1; }
+            api_github_config_salvar "$1" "$2" "$3" "$4"
+            ;;
+        github-config-clear)
+            api_github_config_remover
+            ;;
+        github-site-status)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-site-status <site_user>"; return 1; }
+            api_github_status_repositorio_usuario "$1"
+            ;;
+        github-site-clone)
+            [[ $# -ge 2 ]] || { api_json_erro "uso: __api github-site-clone <site_user> <owner/repo> [branch] [limpar_destino:0|1]"; return 1; }
+            api_github_clonar_repositorio_usuario "$1" "$2" "${3:-}" "${4:-0}"
+            ;;
+        github-site-pull)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-site-pull <site_user>"; return 1; }
+            api_github_pull_repositorio_usuario "$1"
+            ;;
+        github-site-commit-push)
+            [[ $# -ge 2 ]] || { api_json_erro "uso: __api github-site-commit-push <site_user> <mensagem_commit>"; return 1; }
+            api_github_commit_push_usuario "$1" "$2"
             ;;
         *)
             api_json_erro "comando api inválido"
