@@ -184,7 +184,7 @@ resolver_usuario_por_dominio() {
         return 0
     fi
 
-    echo "$user"
+    return 1
 }
 
 usuario_valido() {
