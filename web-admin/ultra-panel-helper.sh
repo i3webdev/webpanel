@@ -405,6 +405,27 @@ cmd_github_site_status() {
     run_script_api github-site-status "$user"
 }
 
+cmd_github_repos_list() {
+    run_script_api github-repos-list
+}
+
+cmd_github_site_clone_start() {
+    local user="${1:-}"
+    local repo_slug="${2:-}"
+    local branch="${3:-}"
+    local clean_target="${4:-0}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ -n "$repo_slug" ]] || err "repositorio GitHub obrigatorio"
+    run_script_api github-site-clone-start "$user" "$repo_slug" "$branch" "$clean_target"
+}
+
+cmd_github_site_clone_status() {
+    local user="${1:-}"
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api github-site-clone-status "$user"
+}
+
 cmd_github_site_clone() {
     local user="${1:-}"
     local repo_slug="${2:-}"
@@ -729,6 +750,17 @@ main() {
         github-site-status)
             [[ $# -ge 1 ]] || err "uso: github-site-status <site_user>"
             cmd_github_site_status "$1"
+            ;;
+        github-repos-list)
+            cmd_github_repos_list
+            ;;
+        github-site-clone-start)
+            [[ $# -ge 2 ]] || err "uso: github-site-clone-start <site_user> <owner/repo> [branch] [limpar_destino:0|1]"
+            cmd_github_site_clone_start "$1" "$2" "${3:-}" "${4:-0}"
+            ;;
+        github-site-clone-status)
+            [[ $# -ge 1 ]] || err "uso: github-site-clone-status <site_user>"
+            cmd_github_site_clone_status "$1"
             ;;
         github-site-clone)
             [[ $# -ge 2 ]] || err "uso: github-site-clone <site_user> <owner/repo> [branch] [limpar_destino:0|1]"

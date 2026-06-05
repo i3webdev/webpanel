@@ -31,10 +31,12 @@ WEB_PANEL_USER="painel_srv"
 GITHUB_PANEL_CONFIG_DIR="/root/.ultra-panel"
 GITHUB_PANEL_CONFIG_FILE="${GITHUB_PANEL_CONFIG_DIR}/github.env"
 GITHUB_DEVICE_FLOW_FILE="${GITHUB_PANEL_CONFIG_DIR}/github-device-flow.env"
+GITHUB_CLONE_JOBS_DIR="${GITHUB_PANEL_CONFIG_DIR}/clone-jobs"
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$CLOUDFLARE_BASE_DIR"
 mkdir -p "$GITHUB_PANEL_CONFIG_DIR"
+mkdir -p "$GITHUB_CLONE_JOBS_DIR"
 
 cor_verde="\033[1;32m"
 cor_amarela="\033[1;33m"
@@ -464,6 +466,14 @@ github_api_user_emails_json() {
         https://api.github.com/user/emails
 }
 
+github_api_repos_json() {
+    local token="${1:-}"
+    curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${token}" \
+        'https://api.github.com/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100'
+}
+
 github_email_primario_por_token() {
     local token="${1:-}"
     local payload
@@ -480,6 +490,159 @@ github_api_payload_error_message() {
     message="$(echo "$payload" | jq -r '.error_description // .message // .error // empty' 2>/dev/null)"
     [[ -n "$message" ]] || return 1
     printf '%s\n' "$message"
+}
+
+github_clone_status_file_por_usuario() {
+    local user="${1:-}"
+    echo "${GITHUB_CLONE_JOBS_DIR}/${user}.env"
+}
+
+github_clone_log_file_por_usuario() {
+    local user="${1:-}"
+    echo "${GITHUB_CLONE_JOBS_DIR}/${user}.log"
+}
+
+github_clone_job_salvar() {
+    local user="${1:-}"
+    local state="${2:-idle}"
+    local job_id="${3:-}"
+    local repo_slug="${4:-}"
+    local branch="${5:-}"
+    local pid="${6:-0}"
+    local started_at="${7:-0}"
+    local updated_at="${8:-0}"
+    local completed_at="${9:-0}"
+    local exit_code="${10:-0}"
+    local message="${11:-}"
+    local log_file="${12:-}"
+    local status_file
+
+    status_file="$(github_clone_status_file_por_usuario "$user")"
+    cat > "$status_file" <<EOF
+GITHUB_CLONE_SITE_USER=$(printf '%q' "$user")
+GITHUB_CLONE_STATE=$(printf '%q' "$state")
+GITHUB_CLONE_JOB_ID=$(printf '%q' "$job_id")
+GITHUB_CLONE_REPO=$(printf '%q' "$repo_slug")
+GITHUB_CLONE_BRANCH=$(printf '%q' "$branch")
+GITHUB_CLONE_PID=$(printf '%q' "$pid")
+GITHUB_CLONE_STARTED_AT=$(printf '%q' "$started_at")
+GITHUB_CLONE_UPDATED_AT=$(printf '%q' "$updated_at")
+GITHUB_CLONE_COMPLETED_AT=$(printf '%q' "$completed_at")
+GITHUB_CLONE_EXIT_CODE=$(printf '%q' "$exit_code")
+GITHUB_CLONE_MESSAGE=$(printf '%q' "$message")
+GITHUB_CLONE_LOG_FILE=$(printf '%q' "$log_file")
+EOF
+    chmod 600 "$status_file"
+}
+
+github_clone_job_ler() {
+    local user="${1:-}"
+    local status_file
+    status_file="$(github_clone_status_file_por_usuario "$user")"
+    [[ -f "$status_file" ]] || return 1
+
+    # shellcheck disable=SC1090
+    source "$status_file"
+
+    GITHUB_CLONE_STATE_VALUE="${GITHUB_CLONE_STATE:-idle}"
+    GITHUB_CLONE_JOB_ID_VALUE="${GITHUB_CLONE_JOB_ID:-}"
+    GITHUB_CLONE_REPO_VALUE="${GITHUB_CLONE_REPO:-}"
+    GITHUB_CLONE_BRANCH_VALUE="${GITHUB_CLONE_BRANCH:-}"
+    GITHUB_CLONE_PID_VALUE="${GITHUB_CLONE_PID:-0}"
+    GITHUB_CLONE_STARTED_AT_VALUE="${GITHUB_CLONE_STARTED_AT:-0}"
+    GITHUB_CLONE_UPDATED_AT_VALUE="${GITHUB_CLONE_UPDATED_AT:-0}"
+    GITHUB_CLONE_COMPLETED_AT_VALUE="${GITHUB_CLONE_COMPLETED_AT:-0}"
+    GITHUB_CLONE_EXIT_CODE_VALUE="${GITHUB_CLONE_EXIT_CODE:-0}"
+    GITHUB_CLONE_MESSAGE_VALUE="${GITHUB_CLONE_MESSAGE:-}"
+    GITHUB_CLONE_LOG_FILE_VALUE="${GITHUB_CLONE_LOG_FILE:-$(github_clone_log_file_por_usuario "$user")}"
+}
+
+github_clone_job_pid_ativo() {
+    local pid="${1:-0}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    (( pid > 0 )) || return 1
+    kill -0 "$pid" >/dev/null 2>&1
+}
+
+github_clone_job_esta_rodando() {
+    local user="${1:-}"
+    github_clone_job_ler "$user" || return 1
+    [[ "$GITHUB_CLONE_STATE_VALUE" == "running" ]] || return 1
+    github_clone_job_pid_ativo "$GITHUB_CLONE_PID_VALUE"
+}
+
+github_clone_job_marcar_stale() {
+    local user="${1:-}"
+    github_clone_job_ler "$user" || return 1
+    [[ "$GITHUB_CLONE_STATE_VALUE" == "running" ]] || return 0
+    if github_clone_job_pid_ativo "$GITHUB_CLONE_PID_VALUE"; then
+        return 0
+    fi
+
+    github_clone_job_salvar \
+        "$user" \
+        "error" \
+        "$GITHUB_CLONE_JOB_ID_VALUE" \
+        "$GITHUB_CLONE_REPO_VALUE" \
+        "$GITHUB_CLONE_BRANCH_VALUE" \
+        "$GITHUB_CLONE_PID_VALUE" \
+        "$GITHUB_CLONE_STARTED_AT_VALUE" \
+        "$(date +%s)" \
+        "$(date +%s)" \
+        "1" \
+        "O processo de clone foi encerrado inesperadamente." \
+        "$GITHUB_CLONE_LOG_FILE_VALUE"
+}
+
+github_clone_job_percentual_por_log() {
+    local log_file="${1:-}"
+    local line percent phase weight
+
+    [[ -f "$log_file" ]] || {
+        printf '0|Preparando clone|Aguardando saida do git.\n'
+        return 0
+    }
+
+    line="$(grep -E 'Receiving objects:|Resolving deltas:|Updating files:|Compressing objects:|remote: Enumerating objects:' "$log_file" 2>/dev/null | tail -n 1)"
+    if [[ -z "$line" ]]; then
+        printf '5|Preparando clone|Iniciando conexao com o GitHub.\n'
+        return 0
+    fi
+
+    if [[ "$line" =~ Receiving\ objects:[[:space:]]*([0-9]+)% ]]; then
+        percent="${BASH_REMATCH[1]}"
+        weight=$(( 30 + (percent * 55 / 100) ))
+        printf '%s|Recebendo objetos|%s\n' "$weight" "$line"
+        return 0
+    fi
+
+    if [[ "$line" =~ Resolving\ deltas:[[:space:]]*([0-9]+)% ]]; then
+        percent="${BASH_REMATCH[1]}"
+        weight=$(( 85 + (percent * 15 / 100) ))
+        printf '%s|Resolvendo deltas|%s\n' "$weight" "$line"
+        return 0
+    fi
+
+    if [[ "$line" =~ Updating\ files:[[:space:]]*([0-9]+)% ]]; then
+        percent="${BASH_REMATCH[1]}"
+        weight=$(( 92 + (percent * 8 / 100) ))
+        printf '%s|Atualizando arquivos|%s\n' "$weight" "$line"
+        return 0
+    fi
+
+    if [[ "$line" =~ Compressing\ objects:[[:space:]]*([0-9]+)% ]]; then
+        percent="${BASH_REMATCH[1]}"
+        weight=$(( 15 + (percent * 15 / 100) ))
+        printf '%s|Comprimindo objetos|%s\n' "$weight" "$line"
+        return 0
+    fi
+
+    if [[ "$line" == *"Enumerating objects:"* ]]; then
+        printf '10|Enumerando objetos|%s\n' "$line"
+        return 0
+    fi
+
+    printf '5|Preparando clone|%s\n' "$line"
 }
 
 github_git_exec_por_usuario() {
@@ -3993,6 +4156,46 @@ api_github_config_remover() {
     fi
 }
 
+api_github_listar_repositorios() {
+    local payload repos_json
+
+    github_config_carregar || {
+        api_json_erro "Credenciais do GitHub nao configuradas."
+        return 1
+    }
+
+    payload="$(github_api_repos_json "$GITHUB_CFG_TOKEN" 2>/dev/null || true)"
+    [[ -n "$payload" ]] || {
+        api_json_erro "Falha ao listar repositorios da conta conectada."
+        return 1
+    }
+
+    if [[ "$(echo "$payload" | jq -r '.error // empty' 2>/dev/null)" != "" ]]; then
+        api_json_erro "$(github_api_payload_error_message "$payload" || echo 'Falha ao listar repositorios do GitHub.')"
+        return 1
+    fi
+
+    repos_json="$(echo "$payload" | jq -c 'map({
+        slug: (.full_name // ""),
+        name: (.name // ""),
+        private: (.private // false),
+        archived: (.archived // false),
+        owner: (.owner.login // ""),
+        default_branch: (.default_branch // ""),
+        updated_at: (.updated_at // ""),
+        html_url: (.html_url // "")
+    })' 2>/dev/null)"
+    [[ -n "$repos_json" ]] || repos_json='[]'
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --argjson repos "$repos_json" \
+            '{ok:true,count:($repos | length),repos:$repos}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
 api_github_device_flow_iniciar() {
     local client_id=""
     local scopes
@@ -4170,6 +4373,316 @@ api_github_device_flow_verificar() {
 
     github_device_flow_limpar
     api_github_config_status
+}
+
+api_github_clone_status_usuario() {
+    local user="${1:-}"
+    local repo_dir status_exists="false" repo_exists="false" running="false" finished="false"
+    local state="idle" job_id="" repo_slug="" branch="" pid="0" started_at="0" updated_at="0" completed_at="0" exit_code="0" message=""
+    local log_file="" progress_raw percent="0" phase="Pronto" detail="" log_tail=""
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    [[ -d "${repo_dir}/.git" ]] && repo_exists="true"
+
+    if github_clone_job_ler "$user"; then
+        status_exists="true"
+        github_clone_job_marcar_stale "$user" || true
+        github_clone_job_ler "$user" || true
+
+        state="$GITHUB_CLONE_STATE_VALUE"
+        job_id="$GITHUB_CLONE_JOB_ID_VALUE"
+        repo_slug="$GITHUB_CLONE_REPO_VALUE"
+        branch="$GITHUB_CLONE_BRANCH_VALUE"
+        pid="$GITHUB_CLONE_PID_VALUE"
+        started_at="$GITHUB_CLONE_STARTED_AT_VALUE"
+        updated_at="$GITHUB_CLONE_UPDATED_AT_VALUE"
+        completed_at="$GITHUB_CLONE_COMPLETED_AT_VALUE"
+        exit_code="$GITHUB_CLONE_EXIT_CODE_VALUE"
+        message="$GITHUB_CLONE_MESSAGE_VALUE"
+        log_file="$GITHUB_CLONE_LOG_FILE_VALUE"
+
+        if [[ "$state" == "running" ]]; then
+            running="true"
+            progress_raw="$(github_clone_job_percentual_por_log "$log_file")"
+            percent="${progress_raw%%|*}"
+            progress_raw="${progress_raw#*|}"
+            phase="${progress_raw%%|*}"
+            detail="${progress_raw#*|}"
+        elif [[ "$state" == "completed" ]]; then
+            finished="true"
+            percent="100"
+            phase="Clone concluido"
+            detail="${message:-Clone concluido com sucesso.}"
+        elif [[ "$state" == "error" ]]; then
+            finished="true"
+            percent="100"
+            phase="Clone interrompido"
+            detail="${message:-Falha ao clonar repositorio.}"
+        fi
+
+        if [[ -f "$log_file" ]]; then
+            log_tail="$(tail -n 12 "$log_file" 2>/dev/null || true)"
+        fi
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg path "$repo_dir" \
+            --argjson status_exists "$status_exists" \
+            --argjson repo_exists "$repo_exists" \
+            --argjson running "$running" \
+            --argjson finished "$finished" \
+            --arg state "$state" \
+            --arg job_id "$job_id" \
+            --arg repo "$repo_slug" \
+            --arg branch "$branch" \
+            --arg pid "$pid" \
+            --argjson started_at "$started_at" \
+            --argjson updated_at "$updated_at" \
+            --argjson completed_at "$completed_at" \
+            --arg exit_code "$exit_code" \
+            --arg message "$message" \
+            --argjson percent "$percent" \
+            --arg phase "$phase" \
+            --arg detail "$detail" \
+            --arg log_tail "$log_tail" \
+            '{ok:true,site_user:$user,path:$path,status_exists:$status_exists,repo_exists:$repo_exists,running:$running,finished:$finished,state:$state,job_id:$job_id,repo:$repo,branch:$branch,pid:$pid,started_at:$started_at,updated_at:$updated_at,completed_at:$completed_at,exit_code:$exit_code,message:$message,percent:$percent,phase:$phase,detail:$detail,log_tail:$log_tail}'
+    else
+        echo "{\"ok\":true}"
+    fi
+}
+
+api_github_clone_iniciar_usuario() {
+    local user="${1:-}"
+    local repo_slug="${2:-}"
+    local branch="${3:-}"
+    local limpar_destino="${4:-0}"
+    local repo_dir repo_url job_id started_at pid log_file
+
+    if ! command -v git >/dev/null 2>&1; then
+        api_json_erro "Git nao encontrado no servidor."
+        return 1
+    fi
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+    if ! github_repo_slug_valido "$repo_slug"; then
+        api_json_erro "Repositorio GitHub invalido."
+        return 1
+    fi
+    if [[ -n "$branch" ]] && ! github_branch_valida "$branch"; then
+        api_json_erro "Branch invalida."
+        return 1
+    fi
+    github_config_carregar || {
+        api_json_erro "Credenciais do GitHub nao configuradas."
+        return 1
+    }
+    if github_clone_job_esta_rodando "$user"; then
+        api_json_erro "Ja existe um clone em andamento para esse site."
+        return 1
+    fi
+
+    repo_dir="$(github_repo_dir_por_usuario "$user")"
+    repo_url="$(github_repo_url_https "$repo_slug")"
+
+    mkdir -p "$repo_dir"
+    chown "${user}:${user}" "$repo_dir" >/dev/null 2>&1 || true
+
+    if [[ -d "${repo_dir}/.git" ]]; then
+        api_json_erro "Esse site ja possui um repositorio Git inicializado."
+        return 1
+    fi
+
+    if find "$repo_dir" -mindepth 1 -maxdepth 1 | read -r _; then
+        if ! bool_sim "$limpar_destino"; then
+            api_json_erro "public_html nao esta vazio. Marque a opcao para limpar antes do clone."
+            return 1
+        fi
+    fi
+
+    job_id="$(date +%s)-${RANDOM}"
+    started_at="$(date +%s)"
+    log_file="$(github_clone_log_file_por_usuario "$user")"
+    : > "$log_file"
+    chmod 600 "$log_file"
+
+    nohup bash "$WEB_PANEL_API_SCRIPT" __api github-site-clone-runner "$user" "$repo_slug" "$branch" "$limpar_destino" "$job_id" >/dev/null 2>&1 &
+    pid="$!"
+
+    github_clone_job_salvar \
+        "$user" \
+        "running" \
+        "$job_id" \
+        "$repo_slug" \
+        "$branch" \
+        "$pid" \
+        "$started_at" \
+        "$started_at" \
+        "0" \
+        "0" \
+        "Clone iniciado em background." \
+        "$log_file"
+
+    api_github_clone_status_usuario "$user"
+}
+
+api_github_clone_runner_usuario() {
+    local user="${1:-}"
+    local repo_slug="${2:-}"
+    local branch="${3:-}"
+    local limpar_destino="${4:-0}"
+    local job_id="${5:-}"
+    local repo_dir repo_url log_file started_at pid current_branch failure_reason
+
+    pid="$$"
+    log_file="$(github_clone_log_file_por_usuario "$user")"
+    started_at="$(date +%s)"
+    if github_clone_job_ler "$user" && [[ "$GITHUB_CLONE_JOB_ID_VALUE" == "$job_id" ]]; then
+        started_at="$GITHUB_CLONE_STARTED_AT_VALUE"
+        log_file="$GITHUB_CLONE_LOG_FILE_VALUE"
+        pid="$GITHUB_CLONE_PID_VALUE"
+    fi
+
+    github_clone_job_salvar \
+        "$user" \
+        "running" \
+        "$job_id" \
+        "$repo_slug" \
+        "$branch" \
+        "$pid" \
+        "$started_at" \
+        "$(date +%s)" \
+        "0" \
+        "0" \
+        "Preparando clone do repositorio." \
+        "$log_file"
+
+    if ! command -v git >/dev/null 2>&1; then
+        failure_reason="Git nao encontrado no servidor."
+    elif ! usuario_valido "$user"; then
+        failure_reason="Usuario invalido."
+    elif [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        failure_reason="Site nao encontrado."
+    elif ! github_repo_slug_valido "$repo_slug"; then
+        failure_reason="Repositorio GitHub invalido."
+    elif [[ -n "$branch" ]] && ! github_branch_valida "$branch"; then
+        failure_reason="Branch invalida."
+    elif ! github_config_carregar; then
+        failure_reason="Credenciais do GitHub nao configuradas."
+    else
+        repo_dir="$(github_repo_dir_por_usuario "$user")"
+        repo_url="$(github_repo_url_https "$repo_slug")"
+
+        mkdir -p "$repo_dir"
+        chown "${user}:${user}" "$repo_dir" >/dev/null 2>&1 || true
+
+        if [[ -d "${repo_dir}/.git" ]]; then
+            failure_reason="Esse site ja possui um repositorio Git inicializado."
+        elif find "$repo_dir" -mindepth 1 -maxdepth 1 | read -r _; then
+            if bool_sim "$limpar_destino"; then
+                find "$repo_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            else
+                failure_reason="public_html nao esta vazio. Marque a opcao para limpar antes do clone."
+            fi
+        fi
+    fi
+
+    if [[ -n "${failure_reason:-}" ]]; then
+        printf '%s\n' "$failure_reason" >> "$log_file"
+        github_clone_job_salvar \
+            "$user" \
+            "error" \
+            "$job_id" \
+            "$repo_slug" \
+            "$branch" \
+            "$pid" \
+            "$started_at" \
+            "$(date +%s)" \
+            "$(date +%s)" \
+            "1" \
+            "$failure_reason" \
+            "$log_file"
+        return 1
+    fi
+
+    github_clone_job_salvar \
+        "$user" \
+        "running" \
+        "$job_id" \
+        "$repo_slug" \
+        "$branch" \
+        "$pid" \
+        "$started_at" \
+        "$(date +%s)" \
+        "0" \
+        "0" \
+        "Clonando repositorio em public_html." \
+        "$log_file"
+
+    if [[ -n "$branch" ]]; then
+        github_git_exec_por_usuario "$user" 1 git clone --progress --branch "$branch" --single-branch "$repo_url" "$repo_dir" >"$log_file" 2>&1
+    else
+        github_git_exec_por_usuario "$user" 1 git clone --progress "$repo_url" "$repo_dir" >"$log_file" 2>&1
+    fi
+
+    if [[ $? -ne 0 ]]; then
+        failure_reason="$(tail -n 1 "$log_file" 2>/dev/null || true)"
+        [[ -n "$failure_reason" ]] || failure_reason="Falha ao clonar repositorio."
+        github_clone_job_salvar \
+            "$user" \
+            "error" \
+            "$job_id" \
+            "$repo_slug" \
+            "$branch" \
+            "$pid" \
+            "$started_at" \
+            "$(date +%s)" \
+            "$(date +%s)" \
+            "1" \
+            "$failure_reason" \
+            "$log_file"
+        return 1
+    fi
+
+    if [[ -n "$GITHUB_CFG_AUTHOR_NAME" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.name "$GITHUB_CFG_AUTHOR_NAME" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$GITHUB_CFG_AUTHOR_EMAIL" ]]; then
+        github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" config user.email "$GITHUB_CFG_AUTHOR_EMAIL" >/dev/null 2>&1 || true
+    fi
+
+    current_branch="$(github_git_exec_por_usuario "$user" 0 git -C "$repo_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [[ -n "$current_branch" ]] || current_branch="$branch"
+
+    github_clone_job_salvar \
+        "$user" \
+        "completed" \
+        "$job_id" \
+        "$repo_slug" \
+        "$current_branch" \
+        "$pid" \
+        "$started_at" \
+        "$(date +%s)" \
+        "$(date +%s)" \
+        "0" \
+        "Clone concluido com sucesso." \
+        "$log_file"
 }
 
 api_github_status_repositorio_usuario() {
@@ -4551,6 +5064,9 @@ api_main() {
         github-config-clear)
             api_github_config_remover
             ;;
+        github-repos-list)
+            api_github_listar_repositorios
+            ;;
         github-device-start)
             api_github_device_flow_iniciar
             ;;
@@ -4560,6 +5076,18 @@ api_main() {
         github-site-status)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-site-status <site_user>"; return 1; }
             api_github_status_repositorio_usuario "$1"
+            ;;
+        github-site-clone-start)
+            [[ $# -ge 2 ]] || { api_json_erro "uso: __api github-site-clone-start <site_user> <owner/repo> [branch] [limpar_destino:0|1]"; return 1; }
+            api_github_clone_iniciar_usuario "$1" "$2" "${3:-}" "${4:-0}"
+            ;;
+        github-site-clone-status)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-site-clone-status <site_user>"; return 1; }
+            api_github_clone_status_usuario "$1"
+            ;;
+        github-site-clone-runner)
+            [[ $# -ge 5 ]] || { api_json_erro "uso: __api github-site-clone-runner <site_user> <owner/repo> <branch> <limpar_destino:0|1> <job_id>"; return 1; }
+            api_github_clone_runner_usuario "$1" "$2" "${3:-}" "${4:-0}" "$5"
             ;;
         github-site-clone)
             [[ $# -ge 2 ]] || { api_json_erro "uso: __api github-site-clone <site_user> <owner/repo> [branch] [limpar_destino:0|1]"; return 1; }
