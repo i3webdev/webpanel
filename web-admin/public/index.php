@@ -1932,6 +1932,10 @@ $activeTabDescription = panelTabDescription($tab);
   <style>
     :root {
       --panel-accent: #2f7db8;
+      --panel-accent-deep: #1f5f8f;
+      --panel-accent-soft: rgba(47, 125, 184, 0.12);
+      --panel-border: rgba(203, 213, 225, 0.82);
+      --panel-surface: rgba(255, 255, 255, 0.96);
     }
 
     .panel-app {
@@ -1939,9 +1943,8 @@ $activeTabDescription = panelTabDescription($tab);
     }
 
     .panel-sidebar {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(247, 250, 252, 0.86) 100%);
-      box-shadow: inset -1px 0 0 rgba(226, 232, 240, 0.85);
-      backdrop-filter: blur(18px);
+      background: linear-gradient(180deg, #f5f8fb 0%, #eef3f8 100%);
+      box-shadow: inset -1px 0 0 rgba(203, 213, 225, 0.9);
     }
 
     .panel-sidebar-inner {
@@ -1952,70 +1955,73 @@ $activeTabDescription = panelTabDescription($tab);
     .panel-brand {
       position: relative;
       overflow: hidden;
-      border: 1px solid rgba(226, 232, 240, 0.96);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 247, 251, 0.94) 100%);
-      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+      border: 1px solid rgba(191, 219, 254, 0.95);
+      background: linear-gradient(180deg, #2373ab 0%, #1f5f8f 100%);
+      box-shadow: 0 18px 40px rgba(31, 95, 143, 0.18);
+      color: #f8fbff;
     }
 
     .panel-brand::after {
       content: "";
       position: absolute;
-      right: -1.5rem;
-      top: -1rem;
-      width: 8rem;
-      height: 8rem;
+      right: -2rem;
+      top: -2rem;
+      width: 9rem;
+      height: 9rem;
       border-radius: 999px;
-      background: radial-gradient(circle, rgba(191, 223, 253, 0.85), rgba(191, 223, 253, 0));
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
       pointer-events: none;
     }
 
-    .panel-brand .text-slate-300 {
-      color: #64748b !important;
+    .panel-brand .text-slate-300,
+    .panel-brand .text-slate-500,
+    .panel-brand .text-slate-950 {
+      color: inherit !important;
     }
 
     .panel-nav-group-title {
-      margin-bottom: 0.625rem;
-      padding-left: 0.25rem;
-      font-size: 0.69rem;
+      margin-bottom: 0.5rem;
+      padding-left: 0.15rem;
+      font-size: 0.68rem;
       font-weight: 700;
-      letter-spacing: 0.18em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: #94a3b8;
+      color: #7b8ca1;
     }
 
     .panel-nav-link {
       display: flex;
-      gap: 0.85rem;
-      border-radius: 1.25rem;
-      border: 1px solid rgba(226, 232, 240, 0.9);
-      background: rgba(255, 255, 255, 0.7);
-      padding: 0.9rem;
+      gap: 0.75rem;
+      align-items: center;
+      border-radius: 0.95rem;
+      border: 1px solid transparent;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 0.78rem 0.82rem;
       color: #334155;
       transition: all 0.18s ease;
     }
 
     .panel-nav-link:hover {
-      border-color: rgba(191, 219, 254, 1);
-      background: rgba(255, 255, 255, 0.98);
-      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
-      transform: translateY(-1px);
+      border-color: rgba(191, 219, 254, 0.96);
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
     }
 
     .panel-nav-link.is-active {
-      border-color: rgba(147, 197, 253, 0.95);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(239, 248, 255, 0.96) 100%);
+      border-color: rgba(147, 197, 253, 0.96);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(237, 245, 252, 1) 100%);
       color: #0f172a;
-      box-shadow: 0 18px 32px rgba(47, 125, 184, 0.12);
+      box-shadow: inset 3px 0 0 var(--panel-accent), 0 12px 24px rgba(47, 125, 184, 0.1);
     }
 
     .panel-nav-icon {
       display: flex;
-      height: 2.75rem;
-      width: 2.75rem;
+      height: 2.45rem;
+      width: 2.45rem;
       flex-shrink: 0;
       align-items: center;
       justify-content: center;
-      border-radius: 1rem;
+      border-radius: 0.9rem;
       border: 1px solid rgba(226, 232, 240, 0.95);
       background: rgba(248, 250, 252, 0.95);
       color: #64748b;
@@ -2030,13 +2036,13 @@ $activeTabDescription = panelTabDescription($tab);
 
     .panel-sidebar-stat {
       border: 1px solid rgba(226, 232, 240, 0.95);
-      background: rgba(255, 255, 255, 0.76);
-      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+      background: rgba(255, 255, 255, 0.8);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
     }
 
     .panel-logout {
       border: 1px solid rgba(203, 213, 225, 0.9);
-      background: rgba(255, 255, 255, 0.84);
+      background: rgba(255, 255, 255, 0.92);
       color: #334155;
       transition: all 0.18s ease;
     }
@@ -2051,13 +2057,18 @@ $activeTabDescription = panelTabDescription($tab);
       position: relative;
     }
 
+    .panel-utility {
+      border: 1px solid rgba(191, 219, 254, 0.9);
+      background: linear-gradient(180deg, rgba(243, 249, 255, 0.96) 0%, rgba(235, 244, 251, 0.94) 100%);
+      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05);
+    }
+
     .panel-topbar {
       position: relative;
       overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.95);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(249, 251, 253, 0.92) 100%);
-      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.07);
-      backdrop-filter: blur(18px);
+      border: 1px solid rgba(203, 213, 225, 0.92);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 252, 0.96) 100%);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
     }
 
     .panel-topbar::after {
@@ -2073,8 +2084,40 @@ $activeTabDescription = panelTabDescription($tab);
 
     .panel-chip {
       border: 1px solid rgba(226, 232, 240, 0.95);
-      background: rgba(255, 255, 255, 0.86);
-      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 252, 0.95) 100%);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+    }
+
+    .panel-chip-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+
+    .panel-section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+      padding-bottom: 0.9rem;
+    }
+
+    .panel-module {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel-module::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, rgba(47, 125, 184, 0.95), rgba(47, 125, 184, 0.3));
+      opacity: 0.85;
     }
 
     .panel-main .shadow-panel,
@@ -2082,11 +2125,11 @@ $activeTabDescription = panelTabDescription($tab);
     .panel-main .rounded-xl.border.border-slate-200.bg-white,
     .panel-main .rounded-xl.border.border-slate-200.bg-slate-50,
     .panel-main .rounded-2xl.border.border-slate-200.bg-slate-50 {
-      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.05);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.045);
     }
 
     .panel-main .bg-slate-50 {
-      background-color: rgba(248, 250, 252, 0.92) !important;
+      background-color: rgba(248, 250, 252, 0.96) !important;
     }
 
     .panel-main .border-slate-200 {
@@ -2112,7 +2155,7 @@ $activeTabDescription = panelTabDescription($tab);
     }
 
     .panel-main table thead {
-      background: rgba(248, 250, 252, 0.96) !important;
+      background: linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.98) 100%) !important;
     }
 
     .panel-main table tbody tr {
@@ -2150,13 +2193,13 @@ $activeTabDescription = panelTabDescription($tab);
         <div class="panel-brand rounded-[28px] p-4">
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700">Ultra Panel</p>
-              <h1 class="mt-3 font-display text-2xl font-semibold text-slate-950"><?= h($panelTitle) ?></h1>
-              <p class="mt-1 text-sm leading-6 text-slate-500">Rotina operacional com uma interface leve, limpa e pronta para producao.</p>
+              <p class="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-white">Hosting Control</p>
+              <h1 class="mt-3 font-display text-2xl font-semibold"><?= h($panelTitle) ?></h1>
+              <p class="mt-1 text-sm leading-6 text-sky-50/90">Interface administrativa inspirada em paineis de hospedagem classicos.</p>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-right shadow-sm">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Painel</p>
-              <p class="mt-1 max-w-[112px] truncate text-sm font-semibold text-slate-900"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
+            <div class="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-right shadow-sm">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">Painel</p>
+              <p class="mt-1 max-w-[112px] truncate text-sm font-semibold text-white"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
             </div>
           </div>
         </div>
@@ -2230,24 +2273,47 @@ $activeTabDescription = panelTabDescription($tab);
     </aside>
 
     <main class="panel-main p-4 sm:p-6 lg:p-8">
+      <div class="panel-utility mb-4 rounded-2xl px-4 py-3">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">Ambiente de hospedagem</p>
+            <p class="mt-1 text-sm text-slate-600">Operacao centralizada para sites, arquivos, bancos e infraestrutura.</p>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-3 lg:min-w-[430px]">
+            <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+              <p class="panel-chip-label">Sites ativos</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) ($totalSites - $suspendedSites)) ?> online</p>
+            </div>
+            <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+              <p class="panel-chip-label">Cloudflare</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) $activeTunnelSites) ?> com tunnel</p>
+            </div>
+            <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+              <p class="panel-chip-label">Capacidade</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <header class="panel-topbar mb-6 rounded-[30px] p-5 sm:p-6">
         <div class="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div class="max-w-3xl">
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Painel operacional</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Area de gerenciamento</p>
             <h2 class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= h($activeTabTitle) ?></h2>
             <p class="mt-2 text-sm leading-6 text-slate-600"><?= h($activeTabDescription) ?></p>
           </div>
           <div class="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
             <div class="panel-chip rounded-2xl px-4 py-3">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Dominio</p>
+              <p class="panel-chip-label">Dominio</p>
               <p class="mt-2 truncate text-sm font-semibold text-slate-900"><?= h($panelDomain !== '' ? $panelDomain : 'nao configurado') ?></p>
             </div>
             <div class="panel-chip rounded-2xl px-4 py-3">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Uptime</p>
+              <p class="panel-chip-label">Uptime</p>
               <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatUptimeUi($uptimeSeconds)) ?></p>
             </div>
             <div class="panel-chip rounded-2xl px-4 py-3">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Capacidade</p>
+              <p class="panel-chip-label">Capacidade</p>
               <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
             </div>
           </div>
@@ -2341,8 +2407,11 @@ $activeTabDescription = panelTabDescription($tab);
           </article>
         </section>
 
-        <section class="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-          <h3 class="font-display text-xl font-semibold text-slate-900">Status de servicos</h3>
+        <section class="panel-module mt-5 rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
+          <div class="panel-section-title">
+            <h3 class="font-display text-xl font-semibold text-slate-900">Status de servicos</h3>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600"><?= h((string) count($serviceStatus)) ?> itens</span>
+          </div>
           <div class="mt-4 flex flex-wrap gap-2">
             <?php foreach ($serviceStatus as $svc): ?>
               <?php
@@ -2396,8 +2465,8 @@ $activeTabDescription = panelTabDescription($tab);
       <?php endif; ?>
 
       <?php if ($tab === 'sites'): ?>
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-          <div class="mb-4 flex items-center justify-between gap-4">
+        <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
+          <div class="panel-section-title mb-4 flex items-center justify-between gap-4">
             <h3 class="font-display text-xl font-semibold text-slate-900">Gerenciamento de sites</h3>
             <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700"><?= $totalSites ?> registros</span>
           </div>
@@ -2575,7 +2644,7 @@ $activeTabDescription = panelTabDescription($tab);
       <?php endif; ?>
 
       <?php if ($tab === 'files'): ?>
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+        <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
           <?php
           $fileSiteDomain = '-';
           foreach ($fileSites as $site) {
@@ -2586,7 +2655,7 @@ $activeTabDescription = panelTabDescription($tab);
           }
           ?>
 
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div class="panel-section-title flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Workspace</p>
               <h3 class="mt-1 font-display text-xl font-semibold text-slate-900">Gerenciador de arquivos</h3>
@@ -3036,8 +3105,11 @@ $activeTabDescription = panelTabDescription($tab);
       <?php endif; ?>
 
       <?php if ($tab === 'database'): ?>
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-          <h3 class="font-display text-xl font-semibold text-slate-900">Acesso ao banco de dados</h3>
+        <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
+          <div class="panel-section-title">
+            <h3 class="font-display text-xl font-semibold text-slate-900">Acesso ao banco de dados</h3>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600"><?= $phpmyadminDomain !== '' ? 'phpMyAdmin online' : 'sem dominio' ?></span>
+          </div>
           <p class="mt-2 text-sm text-slate-600">Abra o phpMyAdmin, publique o dominio dele e gerencie credenciais dos bancos principais e adicionais.</p>
 
           <div class="mt-4 grid gap-4 xl:grid-cols-3">
@@ -3124,8 +3196,8 @@ $activeTabDescription = panelTabDescription($tab);
       <?php endif; ?>
 
       <?php if ($tab === 'system'): ?>
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
+          <div class="panel-section-title flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h3 class="font-display text-xl font-semibold text-slate-900">Sistema</h3>
             <form method="post">
               <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
