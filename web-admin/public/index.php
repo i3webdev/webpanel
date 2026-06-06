@@ -638,16 +638,33 @@ function tabIcon(string $tab): string
 {
     switch ($tab) {
         case 'sites':
-            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/><circle cx="7" cy="6" r="1.5"/><circle cx="7" cy="12" r="1.5"/><circle cx="7" cy="18" r="1.5"/></svg>';
+            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h16"/><path d="M4 12h16"/><path d="M4 16.5h10"/><path d="M7 5v3"/><path d="M12 9.5v3"/><path d="M17 14v3"/><circle cx="17" cy="16.5" r="3.5"/></svg>';
         case 'files':
-            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></svg>';
+            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M8 12h8"/><path d="M8 15h5"/></svg>';
         case 'database':
-            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg>';
+            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 11v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/><path d="M8.5 10.5h7"/></svg>';
         case 'system':
-            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8"><path d="M10.3 4.3a1 1 0 0 1 1.4 0l.6.6a1 1 0 0 0 1 .24l.82-.22a1 1 0 0 1 1.22.7l.2.8a1 1 0 0 0 .74.73l.8.2a1 1 0 0 1 .7 1.22l-.22.82a1 1 0 0 0 .24 1l.6.6a1 1 0 0 1 0 1.4l-.6.6a1 1 0 0 0-.24 1l.22.82a1 1 0 0 1-.7 1.22l-.8.2a1 1 0 0 0-.73.74l-.2.8a1 1 0 0 1-1.22.7l-.82-.22a1 1 0 0 0-1 .24l-.6.6a1 1 0 0 1-1.4 0l-.6-.6a1 1 0 0 0-1-.24l-.82.22a1 1 0 0 1-1.22-.7l-.2-.8a1 1 0 0 0-.74-.73l-.8-.2a1 1 0 0 1-.7-1.22l.22-.82a1 1 0 0 0-.24-1l-.6-.6a1 1 0 0 1 0-1.4l.6-.6a1 1 0 0 0 .24-1l-.22-.82a1 1 0 0 1 .7-1.22l.8-.2a1 1 0 0 0 .73-.74l.2-.8a1 1 0 0 1 1.22-.7l.82.22a1 1 0 0 0 1-.24l.6-.6Z"/><circle cx="12" cy="12" r="3.2"/></svg>';
+            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10"/><path d="M4 17h16"/><path d="M14 7h6"/><path d="M10 17h2"/><circle cx="11" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></svg>';
         case 'dashboard':
         default:
-            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8"><path d="M4 13h7V4H4v9Zm9 7h7V4h-7v16ZM4 20h7v-5H4v5Z"/></svg>';
+            return '<svg viewBox="0 0 24 24" fill="none" class="h-5 w-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19V7"/><path d="M3 19h20"/></svg>';
+    }
+}
+
+function tabDescription(string $tab): string
+{
+    switch ($tab) {
+        case 'sites':
+            return 'Provisionamento, ciclo de vida e acesso dos sites hospedados.';
+        case 'files':
+            return 'Workspace operacional para deploy, edição e integração GitHub.';
+        case 'database':
+            return 'Gestão de bancos, credenciais e acesso rápido ao phpMyAdmin.';
+        case 'system':
+            return 'Serviços, integrações, diagnósticos e configuração da stack.';
+        case 'dashboard':
+        default:
+            return 'Visão executiva da saúde do servidor e dos serviços principais.';
     }
 }
 
@@ -1828,6 +1845,11 @@ $tabs = [
     'database' => 'Banco de Dados',
     'system' => 'Sistema',
 ];
+$navGroups = [
+    'Visao Geral' => ['dashboard'],
+    'Operacao' => ['sites', 'files', 'database'],
+    'Infraestrutura' => ['system'],
+];
 
 $flash = pullFlash() ?? $flash;
 $csrf = csrfToken();
@@ -1839,6 +1861,7 @@ $memoryPercent = (float) ($serverMetrics['memory']['percent'] ?? 0);
 $diskRootPercent = (float) ($serverMetrics['disk']['root']['percent'] ?? 0);
 $uptimeSeconds = (int) ($serverMetrics['uptime']['seconds'] ?? 0);
 $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
+$activeTabDescription = tabDescription($tab);
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -1858,66 +1881,142 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
             body: ['Public Sans', 'sans-serif'],
             display: ['Outfit', 'sans-serif']
           },
+          colors: {
+            panel: {
+              950: '#06131f',
+              900: '#0b1f32',
+              800: '#12304b',
+              700: '#19476c',
+              500: '#2f7db8'
+            }
+          },
           boxShadow: {
-            panel: '0 10px 30px rgba(15, 23, 42, 0.08)'
+            panel: '0 16px 45px rgba(15, 23, 42, 0.08)',
+            nav: '0 14px 30px rgba(6, 19, 31, 0.22)'
           }
         }
       }
     };
   </script>
 </head>
-<body class="min-h-screen bg-slate-100 font-body text-slate-800 antialiased">
-  <div class="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
-    <aside class="border-b border-slate-200 bg-white px-4 py-5 shadow-sm lg:min-h-screen lg:border-b-0 lg:border-r lg:px-5">
-      <div class="mb-6">
-        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Ultra Control</p>
-        <h1 class="mt-2 font-display text-2xl font-semibold text-slate-900"><?= h($panelTitle) ?></h1>
-        <p class="mt-1 text-xs text-slate-500">Painel estilo hosting admin</p>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(47,125,184,0.16),_transparent_36%),linear-gradient(180deg,#f8fafc_0%,#eef4f8_100%)] font-body text-slate-800 antialiased">
+  <div class="min-h-screen lg:grid lg:grid-cols-[320px_1fr]">
+    <aside class="relative overflow-hidden border-b border-panel-800 bg-panel-950 px-4 py-5 text-slate-100 shadow-nav lg:min-h-screen lg:border-b-0 lg:border-r lg:px-5">
+      <div class="pointer-events-none absolute inset-0">
+        <div class="absolute -left-16 top-0 h-44 w-44 rounded-full bg-blue-500/18 blur-3xl"></div>
+        <div class="absolute right-0 top-28 h-40 w-40 rounded-full bg-cyan-400/10 blur-3xl"></div>
+        <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
       </div>
 
-      <nav class="space-y-1">
-        <?php foreach ($tabs as $key => $label): ?>
-          <?php $active = $tab === $key; ?>
-          <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition <?= $active ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' ?>">
-            <span class="<?= $active ? 'text-white' : 'text-slate-400 group-hover:text-slate-700' ?>"><?= tabIcon($key) ?></span>
-            <span><?= h($label) ?></span>
-          </a>
-        <?php endforeach; ?>
-      </nav>
+      <div class="relative">
+        <div class="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="inline-flex rounded-full border border-blue-400/30 bg-blue-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.26em] text-blue-100">Ultra Control</p>
+              <h1 class="mt-3 font-display text-2xl font-semibold text-white"><?= h($panelTitle) ?></h1>
+              <p class="mt-1 text-sm text-slate-300">Painel operacional com visual mais sólido, limpo e orientado a rotina.</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-right">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Painel</p>
+              <p class="mt-1 text-sm font-semibold text-white"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
+            </div>
+          </div>
+        </div>
 
-      <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Resumo</p>
-        <dl class="mt-3 space-y-2 text-sm">
-          <div class="flex items-center justify-between">
-            <dt class="text-slate-600">Sites</dt>
-            <dd class="font-semibold text-slate-900"><?= $totalSites ?></dd>
+        <nav class="mt-6 space-y-5">
+          <?php foreach ($navGroups as $groupLabel => $groupTabs): ?>
+            <div>
+              <p class="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400"><?= h($groupLabel) ?></p>
+              <div class="space-y-2">
+                <?php foreach ($groupTabs as $key): ?>
+                  <?php
+                  $active = $tab === $key;
+                  $label = $tabs[$key];
+                  $badgeText = '';
+                  if ($key === 'sites') {
+                      $badgeText = (string) $totalSites;
+                  } elseif ($key === 'files' && $fileSite !== '') {
+                      $badgeText = $fileSite;
+                  } elseif ($key === 'database' && $phpmyadminDomain !== '') {
+                      $badgeText = 'DB';
+                  } elseif ($key === 'system') {
+                      $badgeText = 'Stack';
+                  } elseif ($key === 'dashboard') {
+                      $badgeText = 'Live';
+                  }
+                  ?>
+                  <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="group flex items-start gap-3 rounded-2xl border px-3 py-3 transition <?= $active ? 'border-blue-400/30 bg-gradient-to-r from-blue-500/18 to-cyan-400/8 text-white shadow-lg shadow-blue-950/30' : 'border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/15 hover:bg-white/[0.06]' ?>">
+                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border <?= $active ? 'border-blue-300/20 bg-blue-400/15 text-blue-100' : 'border-white/10 bg-white/[0.06] text-slate-300 group-hover:text-white' ?>">
+                      <?= tabIcon($key) ?>
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="flex items-center justify-between gap-3">
+                        <span class="text-sm font-semibold"><?= h($label) ?></span>
+                        <?php if ($badgeText !== ''): ?>
+                          <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] <?= $active ? 'bg-white/10 text-white' : 'bg-white/8 text-slate-300' ?>"><?= h($badgeText) ?></span>
+                        <?php endif; ?>
+                      </span>
+                      <span class="mt-1 block text-xs leading-5 <?= $active ? 'text-blue-100/90' : 'text-slate-400 group-hover:text-slate-300' ?>"><?= h(tabDescription($key)) ?></span>
+                    </span>
+                  </a>
+                <?php endforeach; ?>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </nav>
+
+        <div class="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Sites</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-white"><?= $totalSites ?></p>
+            <p class="mt-1 text-xs text-slate-400">Base total publicada</p>
           </div>
-          <div class="flex items-center justify-between">
-            <dt class="text-slate-600">Suspensos</dt>
-            <dd class="font-semibold text-amber-700"><?= $suspendedSites ?></dd>
+          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Suspensos</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-amber-300"><?= $suspendedSites ?></p>
+            <p class="mt-1 text-xs text-slate-400">Exigem atenção operacional</p>
           </div>
-          <div class="flex items-center justify-between">
-            <dt class="text-slate-600">Tunnel ativo</dt>
-            <dd class="font-semibold text-emerald-700"><?= $activeTunnelSites ?></dd>
+          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Tunnel</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-emerald-300"><?= $activeTunnelSites ?></p>
+            <p class="mt-1 text-xs text-slate-400">Sites com Cloudflare ativo</p>
           </div>
-        </dl>
+        </div>
+
+        <form method="post" class="mt-6">
+          <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+          <input type="hidden" name="action" value="logout">
+          <button type="submit" class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.08]">Sair do painel</button>
+        </form>
       </div>
-
-      <form method="post" class="mt-6">
-        <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-        <input type="hidden" name="action" value="logout">
-        <button type="submit" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Sair do painel</button>
-      </form>
     </aside>
 
     <main class="p-4 sm:p-6 lg:p-8">
-      <header class="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-panel sm:p-5">
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Area ativa</p>
-            <h2 class="mt-1 font-display text-2xl font-semibold text-slate-900"><?= h($activeTabTitle) ?></h2>
+      <header class="relative mb-6 overflow-hidden rounded-3xl border border-white/70 bg-white/85 p-5 shadow-panel backdrop-blur sm:p-6">
+        <div class="pointer-events-none absolute inset-0">
+          <div class="absolute right-0 top-0 h-32 w-40 rounded-full bg-blue-100 blur-3xl"></div>
+          <div class="absolute left-10 bottom-0 h-24 w-32 rounded-full bg-cyan-100 blur-3xl"></div>
+        </div>
+        <div class="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div class="max-w-3xl">
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">Area ativa</p>
+            <h2 class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= h($activeTabTitle) ?></h2>
+            <p class="mt-2 text-sm leading-6 text-slate-600"><?= h($activeTabDescription) ?></p>
           </div>
-          <div class="text-xs text-slate-500">Dominio do painel: <span class="font-semibold text-slate-700"><?= h($panelDomain !== '' ? $panelDomain : 'nao configurado') ?></span></div>
+          <div class="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
+            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Dominio</p>
+              <p class="mt-2 truncate text-sm font-semibold text-slate-900"><?= h($panelDomain !== '' ? $panelDomain : 'nao configurado') ?></p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Uptime</p>
+              <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatUptimeUi($uptimeSeconds)) ?></p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Capacidade</p>
+              <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
+            </div>
+          </div>
         </div>
       </header>
 
