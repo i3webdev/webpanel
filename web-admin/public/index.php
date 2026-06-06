@@ -7,6 +7,10 @@ const PANEL_HELPER_BIN = '/usr/local/sbin/ultra-panel-helper';
 const PANEL_AUTH_COOKIE = 'ultra_panel_auth';
 const PANEL_FLASH_COOKIE = 'ultra_panel_flash';
 const PANEL_CSRF_COOKIE = 'ultra_panel_csrf';
+const PANEL_FILE_IO_MAX_BYTES = 2097152;
+const PANEL_LOGIN_MAX_ATTEMPTS = 5;
+const PANEL_LOGIN_WINDOW_SECONDS = 600;
+const PANEL_LOGIN_LOCKOUT_SECONDS = 900;
 
 function loadEnvFile(string $path): array
 {
@@ -46,17 +50,13 @@ function h(string $value): string
 
 function panelExec(array $args, string $stdin = ''): array
 {
-    $cmd = 'sudo ' . escapeshellarg(PANEL_HELPER_BIN);
-    foreach ($args as $arg) {
-        $cmd .= ' ' . escapeshellarg($arg);
-    }
-
     $descriptors = [
         0 => ['pipe', 'r'],
         1 => ['pipe', 'w'],
         2 => ['pipe', 'w'],
     ];
 
+    $cmd = array_merge(['sudo', PANEL_HELPER_BIN], array_map(static fn($arg): string => (string) $arg, $args));
     $proc = proc_open($cmd, $descriptors, $pipes);
     if (!is_resource($proc)) {
         return [1, '', 'Falha ao executar helper'];
@@ -80,6 +80,17 @@ function redirectTo(string $url): never
 {
     header('Location: ' . $url);
     exit;
+}
+
+function sendSecurityHeaders(): void
+{
+    header_remove('X-Powered-By');
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
 }
 
 function baseUrl(array $params = []): string
@@ -279,6 +290,102 @@ function pullFlash(): ?array
     }
 
     return ['type' => $type, 'text' => $text];
+}
+
+function panelClientIp(): string
+{
+    $remote = trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    if ($remote !== '') {
+        return $remote;
+    }
+
+    return 'unknown';
+}
+
+function loginThrottleFile(string $clientIp): string
+{
+    return rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'ultra-panel-login-' . hash('sha256', $clientIp) . '.json';
+}
+
+function loginThrottleState(string $clientIp): array
+{
+    $file = loginThrottleFile($clientIp);
+    if (!is_file($file)) {
+        return ['attempts' => [], 'locked_until' => 0];
+    }
+
+    $raw = @file_get_contents($file);
+    if (!is_string($raw) || $raw === '') {
+        return ['attempts' => [], 'locked_until' => 0];
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return ['attempts' => [], 'locked_until' => 0];
+    }
+
+    $attempts = [];
+    foreach (($decoded['attempts'] ?? []) as $attempt) {
+        if (is_int($attempt) || ctype_digit((string) $attempt)) {
+            $attempts[] = (int) $attempt;
+        }
+    }
+
+    $lockedUntil = (int) ($decoded['locked_until'] ?? 0);
+
+    return ['attempts' => $attempts, 'locked_until' => $lockedUntil];
+}
+
+function loginThrottleSave(string $clientIp, array $state): void
+{
+    $file = loginThrottleFile($clientIp);
+    $payload = json_encode([
+        'attempts' => array_values($state['attempts'] ?? []),
+        'locked_until' => (int) ($state['locked_until'] ?? 0),
+    ]);
+    if (!is_string($payload)) {
+        return;
+    }
+
+    if (@file_put_contents($file, $payload, LOCK_EX) !== false) {
+        @chmod($file, 0600);
+    }
+}
+
+function loginThrottleSecondsRemaining(string $clientIp): int
+{
+    $state = loginThrottleState($clientIp);
+    $remaining = (int) ($state['locked_until'] ?? 0) - time();
+    return max(0, $remaining);
+}
+
+function loginThrottleRegisterFailure(string $clientIp): int
+{
+    $now = time();
+    $state = loginThrottleState($clientIp);
+    $attempts = array_values(array_filter(
+        $state['attempts'] ?? [],
+        static fn($attempt): bool => ((int) $attempt) > ($now - PANEL_LOGIN_WINDOW_SECONDS)
+    ));
+    $attempts[] = $now;
+
+    $lockedUntil = (int) ($state['locked_until'] ?? 0);
+    if (count($attempts) >= PANEL_LOGIN_MAX_ATTEMPTS) {
+        $lockedUntil = $now + PANEL_LOGIN_LOCKOUT_SECONDS;
+        $attempts = [];
+    }
+
+    loginThrottleSave($clientIp, [
+        'attempts' => $attempts,
+        'locked_until' => $lockedUntil,
+    ]);
+
+    return max(0, $lockedUntil - $now);
+}
+
+function loginThrottleClear(string $clientIp): void
+{
+    @unlink(loginThrottleFile($clientIp));
 }
 
 function sanitizeRelPath(string $path): string
@@ -726,20 +833,34 @@ $config = loadEnvFile(PANEL_CONFIG_FILE);
 $panelTitle = $config['PANEL_TITLE'] ?? 'ULTRA Web Panel';
 $panelUser = $config['PANEL_USER'] ?? 'admin';
 $panelPassHash = $config['PANEL_PASS_HASH'] ?? '';
+sendSecurityHeaders();
 
 $action = (string) ($_POST['action'] ?? '');
 
 if ($action === 'login') {
     $username = trim((string) ($_POST['username'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
+    $clientIp = panelClientIp();
+    $lockSeconds = loginThrottleSecondsRemaining($clientIp);
+
+    if ($lockSeconds > 0) {
+        setFlash('error', 'Muitas tentativas de login. Tente novamente em ' . $lockSeconds . 's.');
+        redirectTo(baseUrl());
+    }
 
     if ($username === $panelUser && $panelPassHash !== '' && password_verify($password, $panelPassHash)) {
+        loginThrottleClear($clientIp);
         setAuthCookie($panelUser);
         setFlash('success', 'Login realizado com sucesso.');
         redirectTo(baseUrl(['tab' => 'dashboard']));
     }
 
-    setFlash('error', 'Usuario ou senha invalidos.');
+    $lockSeconds = loginThrottleRegisterFailure($clientIp);
+    if ($lockSeconds > 0) {
+        setFlash('error', 'Muitas tentativas de login. Tente novamente em ' . $lockSeconds . 's.');
+    } else {
+        setFlash('error', 'Usuario ou senha invalidos.');
+    }
     redirectTo(baseUrl());
 }
 
@@ -1072,7 +1193,7 @@ try {
                 throw new RuntimeException('A confirmacao da senha SSH nao confere.');
             }
 
-            [$code, $out, $stderr] = panelExec(['site-set-ssh-password', $siteUser, $password]);
+            [$code, $out, $stderr] = panelExec(['site-set-ssh-password-stdin', $siteUser], $password);
             $payload = decodeJson($out);
             if ($code === 0 && ($payload['ok'] ?? false) === true) {
                 $domain = (string) ($payload['domain'] ?? '');
@@ -1096,6 +1217,9 @@ try {
 
             if ($siteUser === '' || $filePath === '') {
                 throw new RuntimeException('Parametros invalidos para salvar arquivo.');
+            }
+            if (strlen($fileContent) > PANEL_FILE_IO_MAX_BYTES) {
+                throw new RuntimeException('Arquivo maior que 2MB nao pode ser salvo pelo painel.');
             }
 
             [$code, , $stderr] = panelExec(['file-write', $siteUser, $filePath], $fileContent);
@@ -1170,11 +1294,17 @@ try {
             if ($name === '' || str_contains($name, '..')) {
                 throw new RuntimeException('Nome de arquivo invalido.');
             }
+            if ((int) ($file['size'] ?? 0) > PANEL_FILE_IO_MAX_BYTES) {
+                throw new RuntimeException('Uploads acima de 2MB nao sao permitidos no painel.');
+            }
 
             $target = sanitizeRelPath(($currentPath === '' ? '' : $currentPath . '/') . $name);
             $content = file_get_contents((string) $file['tmp_name']);
             if ($content === false) {
                 throw new RuntimeException('Nao foi possivel ler arquivo temporario.');
+            }
+            if (strlen($content) > PANEL_FILE_IO_MAX_BYTES) {
+                throw new RuntimeException('Uploads acima de 2MB nao sao permitidos no painel.');
             }
 
             [$code, , $stderr] = panelExec(['file-write', $siteUser, $target], $content);
@@ -1268,7 +1398,7 @@ try {
                 throw new RuntimeException('A confirmacao da senha do OLS nao confere.');
             }
 
-            [$code, $out, $stderr] = panelExec(['ols-set-admin', $adminUser, $adminPass]);
+            [$code, $out, $stderr] = panelExec(['ols-set-admin-stdin', $adminUser], $adminPass);
             $payload = decodeJson($out);
 
             if ($code === 0 && ($payload['ok'] ?? false) === true) {
@@ -1556,7 +1686,7 @@ try {
                 throw new RuntimeException('Preencha usuario, token, nome e email validos para integrar o GitHub.');
             }
 
-            [$code, $out, $stderr] = panelExec(['github-config-set', $username, $token, $authorName, $authorEmail]);
+            [$code, $out, $stderr] = panelExec(['github-config-set-stdin', $username, $authorName, $authorEmail], $token);
             $payload = decodeJson($out);
 
             if ($code === 0 && ($payload['ok'] ?? false) === true) {
@@ -1814,7 +1944,7 @@ if ($tab === 'files' && $fileSite !== '') {
         $githubCloneStatus = ['ok' => false, 'error' => $err];
     }
 
-    if (!empty($githubConfigStatus['configured'])) {
+    if (!empty($githubConfigStatus['configured']) && empty($githubSiteStatus['repo_exists'])) {
         [$code, $out, $err] = panelExec(['github-repos-list']);
         if ($code === 0) {
             $githubRepoList = decodeJson($out);

@@ -3734,6 +3734,13 @@ api_trocar_senha_ssh_por_usuario() {
     fi
 }
 
+api_trocar_senha_ssh_por_usuario_stdin() {
+    local user="${1:-}"
+    local nova_senha
+    nova_senha="$(cat)"
+    api_trocar_senha_ssh_por_usuario "$user" "$nova_senha"
+}
+
 api_ver_logs_erro_por_usuario() {
     local user="${1:-}"
     local linhas="${2:-80}"
@@ -4019,6 +4026,13 @@ api_definir_credenciais_ols_admin() {
     fi
 }
 
+api_definir_credenciais_ols_admin_stdin() {
+    local admin_user="${1:-admin}"
+    local admin_pass
+    admin_pass="$(cat)"
+    api_definir_credenciais_ols_admin "$admin_user" "$admin_pass"
+}
+
 api_cloudflare_status() {
     local authenticated="false"
     local login_running="false"
@@ -4206,6 +4220,15 @@ api_github_config_remover() {
     else
         echo "{\"ok\":true}"
     fi
+}
+
+api_github_config_salvar_stdin() {
+    local username="${1:-}"
+    local author_name="${2:-}"
+    local author_email="${3:-}"
+    local token
+    token="$(cat)"
+    api_github_config_salvar "$username" "$token" "$author_name" "$author_email"
 }
 
 api_github_listar_repositorios() {
@@ -5086,6 +5109,10 @@ api_main() {
             [[ $# -ge 2 ]] || { api_json_erro "uso: __api site-set-ssh-password <site_user> <nova_senha>"; return 1; }
             api_trocar_senha_ssh_por_usuario "$1" "$2"
             ;;
+        site-set-ssh-password-stdin)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-set-ssh-password-stdin <site_user>"; return 1; }
+            api_trocar_senha_ssh_por_usuario_stdin "$1"
+            ;;
         site-error-log)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-error-log <site_user> [linhas]"; return 1; }
             api_ver_logs_erro_por_usuario "$1" "${2:-80}"
@@ -5106,6 +5133,10 @@ api_main() {
             [[ $# -ge 2 ]] || { api_json_erro "uso: __api ols-set-admin <usuario> <senha>"; return 1; }
             api_definir_credenciais_ols_admin "$1" "$2"
             ;;
+        ols-set-admin-stdin)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api ols-set-admin-stdin <usuario>"; return 1; }
+            api_definir_credenciais_ols_admin_stdin "$1"
+            ;;
         cloudflare-status)
             api_cloudflare_status
             ;;
@@ -5118,6 +5149,10 @@ api_main() {
         github-config-set)
             [[ $# -ge 4 ]] || { api_json_erro "uso: __api github-config-set <usuario> <token> <autor_nome> <autor_email>"; return 1; }
             api_github_config_salvar "$1" "$2" "$3" "$4"
+            ;;
+        github-config-set-stdin)
+            [[ $# -ge 3 ]] || { api_json_erro "uso: __api github-config-set-stdin <usuario> <autor_nome> <autor_email>"; return 1; }
+            api_github_config_salvar_stdin "$1" "$2" "$3"
             ;;
         github-oauth-app-set)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api github-oauth-app-set <client_id> [scopes]"; return 1; }

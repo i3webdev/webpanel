@@ -5,10 +5,60 @@ SITES_ROOT="/home"
 VHOSTS_DIR="/usr/local/lsws/conf/vhosts"
 OLS_SERVICE="lsws"
 ULTRA_SCRIPT_DEFAULT="/opt/ultra-web-panel/script.sh"
+HELPER_CACHE_DIR="/tmp/ultra-panel-helper-cache"
+HELPER_MAX_FILE_BYTES=$((2 * 1024 * 1024))
 
 err() {
     echo "ERRO: $*" >&2
     exit 1
+}
+
+cache_file_path() {
+    local key="${1:-default}"
+    mkdir -p "$HELPER_CACHE_DIR"
+    chmod 700 "$HELPER_CACHE_DIR" >/dev/null 2>&1 || true
+    echo "${HELPER_CACHE_DIR}/${key}.json"
+}
+
+cache_print_if_fresh() {
+    local key="${1:-}"
+    local ttl="${2:-0}"
+    local file now mtime
+
+    [[ -n "$key" && "$ttl" -gt 0 ]] || return 1
+    file="$(cache_file_path "$key")"
+    [[ -f "$file" ]] || return 1
+
+    now="$(date +%s)"
+    mtime="$(stat -c '%Y' "$file" 2>/dev/null || echo 0)"
+    if (( now - mtime <= ttl )); then
+        cat "$file"
+        return 0
+    fi
+
+    return 1
+}
+
+cache_store() {
+    local key="${1:-}"
+    local payload="${2:-}"
+    local file tmp
+
+    [[ -n "$key" ]] || return 0
+    file="$(cache_file_path "$key")"
+    tmp="$(mktemp)"
+    printf '%s' "$payload" >"$tmp"
+    mv -f "$tmp" "$file"
+    chmod 600 "$file" >/dev/null 2>&1 || true
+}
+
+cache_invalidate() {
+    local key file
+    for key in "$@"; do
+        [[ -n "$key" ]] || continue
+        file="$(cache_file_path "$key")"
+        rm -f "$file"
+    done
 }
 
 require_root() {
@@ -111,7 +161,12 @@ resolve_inside() {
 }
 
 cmd_list_sites() {
+    if cache_print_if_fresh "list-sites" 15; then
+        return 0
+    fi
+
     local tmp
+    local payload
     tmp="$(mktemp)"
 
     local dir user domain root suspended tunnel kind
@@ -139,7 +194,7 @@ cmd_list_sites() {
             "$user" "$domain" "$root" "$suspended" "$tunnel" "$kind" >>"$tmp"
     done
 
-    jq -R -s '
+    payload="$(jq -R -s '
       split("\n")
       | map(select(length > 0))
       | map(split("\t") | {
@@ -151,14 +206,21 @@ cmd_list_sites() {
           kind: .[5]
         })
       | sort_by(.user)
-    ' "$tmp"
+    ' "$tmp")"
 
     rm -f "$tmp"
+    printf '%s\n' "$payload"
+    cache_store "list-sites" "$payload"
 }
 
 cmd_service_status() {
+    if cache_print_if_fresh "service-status" 8; then
+        return 0
+    fi
+
     local services=("lsws" "mariadb" "redis" "crond")
     local tmp
+    local payload
     tmp="$(mktemp)"
 
     local s status
@@ -176,13 +238,15 @@ cmd_service_status() {
         printf '%s\t%s\n' "$s" "$status" >>"$tmp"
     done
 
-    jq -R -s '
+    payload="$(jq -R -s '
       split("\n")
       | map(select(length > 0))
       | map(split("\t") | {service: .[0], status: .[1]})
-    ' "$tmp"
+    ' "$tmp")"
 
     rm -f "$tmp"
+    printf '%s\n' "$payload"
+    cache_store "service-status" "$payload"
 }
 
 cmd_restart_services() {
@@ -193,10 +257,15 @@ cmd_restart_services() {
             systemctl restart "$s" || true
         fi
     done
+    cache_invalidate "service-status" "server-metrics"
     echo '{"ok":true}'
 }
 
 cmd_server_metrics() {
+    if cache_print_if_fresh "server-metrics" 5; then
+        return 0
+    fi
+
     local mem_total_kb mem_available_kb mem_used_kb mem_percent
     mem_total_kb="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
     mem_available_kb="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
@@ -208,7 +277,7 @@ cmd_server_metrics() {
 
     local cpu_line_a cpu_line_b cpu_percent
     read -r _ cpu_user_a cpu_nice_a cpu_system_a cpu_idle_a cpu_iowait_a cpu_irq_a cpu_softirq_a cpu_steal_a _ < /proc/stat
-    sleep 0.4
+    sleep 0.2
     read -r _ cpu_user_b cpu_nice_b cpu_system_b cpu_idle_b cpu_iowait_b cpu_irq_b cpu_softirq_b cpu_steal_b _ < /proc/stat
 
     local idle_a idle_b total_a total_b delta_idle delta_total
@@ -244,7 +313,8 @@ cmd_server_metrics() {
     local top_json
     top_json="$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu 2>/dev/null | awk 'NR>1 && count<5 {printf("%s{\"pid\":%s,\"command\":\"%s\",\"cpu\":%s,\"mem\":%s}", sep, $1, $2, $3, $4); sep=","; count++ } END { printf("") }')"
 
-    jq -n \
+    local payload
+    payload="$(jq -n \
         --argjson cpu_percent "$cpu_percent" \
         --argjson cpu_cores "$cpu_cores" \
         --arg load1 "$load1" \
@@ -285,7 +355,9 @@ cmd_server_metrics() {
                 mounts: $disks
             },
             top_processes: $top_processes
-        }'
+        }')"
+    printf '%s\n' "$payload"
+    cache_store "server-metrics" "$payload"
 }
 
 cmd_install_stack_base() {
@@ -299,6 +371,7 @@ cmd_configure_phpmyadmin_domain() {
 
     [[ -n "$domain_raw" ]] || err "dominio do phpMyAdmin obrigatorio"
     run_script_api configure-phpmyadmin-domain "$domain_raw" "$remove_others" "$create_tunnel"
+    cache_invalidate "list-sites"
 }
 
 cmd_configure_panel_domain() {
@@ -307,6 +380,7 @@ cmd_configure_panel_domain() {
 
     [[ -n "$domain_raw" ]] || err "dominio do painel obrigatorio"
     run_script_api configure-panel-domain "$domain_raw" "$create_tunnel"
+    cache_invalidate "list-sites"
 }
 
 cmd_db_rotate_password() {
@@ -322,6 +396,13 @@ cmd_site_set_ssh_password() {
     site_user_exists "$user" || err "site nao encontrado"
     [[ -n "$password" ]] || err "senha SSH obrigatoria"
     run_script_api site-set-ssh-password "$user" "$password"
+}
+
+cmd_site_set_ssh_password_stdin() {
+    local user="${1:-}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api site-set-ssh-password-stdin "$user"
 }
 
 cmd_site_error_log() {
@@ -362,6 +443,11 @@ cmd_ols_set_admin() {
     run_script_api ols-set-admin "$admin_user" "$admin_pass"
 }
 
+cmd_ols_set_admin_stdin() {
+    local admin_user="${1:-admin}"
+    run_script_api ols-set-admin-stdin "$admin_user"
+}
+
 cmd_cloudflare_status() {
     run_script_api cloudflare-status
 }
@@ -385,6 +471,19 @@ cmd_github_config_set() {
     [[ -n "$author_name" ]] || err "nome do autor obrigatorio"
     [[ -n "$author_email" ]] || err "email do autor obrigatorio"
     run_script_api github-config-set "$username" "$token" "$author_name" "$author_email"
+    cache_invalidate "github-repos-list"
+}
+
+cmd_github_config_set_stdin() {
+    local username="${1:-}"
+    local author_name="${2:-}"
+    local author_email="${3:-}"
+
+    [[ -n "$username" ]] || err "usuario do GitHub obrigatorio"
+    [[ -n "$author_name" ]] || err "nome do autor obrigatorio"
+    [[ -n "$author_email" ]] || err "email do autor obrigatorio"
+    run_script_api github-config-set-stdin "$username" "$author_name" "$author_email"
+    cache_invalidate "github-repos-list"
 }
 
 cmd_github_oauth_app_set() {
@@ -393,10 +492,12 @@ cmd_github_oauth_app_set() {
 
     [[ -n "$client_id" ]] || err "client id do GitHub obrigatorio"
     run_script_api github-oauth-app-set "$client_id" "$scopes"
+    cache_invalidate "github-repos-list"
 }
 
 cmd_github_config_clear() {
     run_script_api github-config-clear
+    cache_invalidate "github-repos-list"
 }
 
 cmd_github_device_start() {
@@ -415,7 +516,14 @@ cmd_github_site_status() {
 }
 
 cmd_github_repos_list() {
-    run_script_api github-repos-list
+    if cache_print_if_fresh "github-repos-list" 30; then
+        return 0
+    fi
+
+    local payload
+    payload="$(run_script_api github-repos-list)"
+    printf '%s\n' "$payload"
+    cache_store "github-repos-list" "$payload"
 }
 
 cmd_github_site_clone_start() {
@@ -470,6 +578,7 @@ cmd_suspend_site() {
     chmod 000 "${root_dir}/public_html" || true
     systemctl stop "cloudflared-${user}.service" >/dev/null 2>&1 || true
 
+    cache_invalidate "list-sites"
     echo '{"ok":true}'
 }
 
@@ -482,6 +591,7 @@ cmd_reactivate_site() {
     chmod 755 "${root_dir}/public_html" || true
     systemctl restart "cloudflared-${user}.service" >/dev/null 2>&1 || true
 
+    cache_invalidate "list-sites"
     echo '{"ok":true}'
 }
 
@@ -493,6 +603,7 @@ cmd_site_create() {
 
     [[ -n "$domain_raw" ]] || err "domínio obrigatório"
     run_script_api create-site "$domain_raw" "$php_version" "$install_wp" "$create_tunnel"
+    cache_invalidate "list-sites"
 }
 
 cmd_db_create_additional() {
@@ -512,6 +623,7 @@ cmd_site_clone() {
     site_user_exists "$source_user" || err "site de origem não encontrado"
     [[ -n "$dest_domain" ]] || err "domínio de destino obrigatório"
     run_script_api clone-site "$source_user" "$dest_domain" "$php_version" "$create_tunnel"
+    cache_invalidate "list-sites"
 }
 
 cmd_site_remove() {
@@ -520,6 +632,7 @@ cmd_site_remove() {
 
     valid_user "$user" || err "usuário inválido"
     run_script_api remove-site "$user" "$with_backup"
+    cache_invalidate "list-sites"
 }
 
 cmd_cron_add() {
@@ -628,9 +741,9 @@ cmd_file_read() {
     target="$(resolve_inside "$base" "$rel")"
     [[ -f "$target" ]] || err "arquivo não encontrado"
 
-    max_size=$((1024 * 1024))
+    max_size="$HELPER_MAX_FILE_BYTES"
     size="$(stat -c '%s' "$target" 2>/dev/null || echo 0)"
-    [[ "$size" -le "$max_size" ]] || err "arquivo maior que 1MB"
+    [[ "$size" -le "$max_size" ]] || err "arquivo maior que 2MB"
 
     cat "$target"
 }
@@ -640,7 +753,7 @@ cmd_file_write() {
     local rel_raw="${2:-}"
     site_user_exists "$user" || err "site não encontrado"
 
-    local base rel target tmp
+    local base rel target tmp size
     base="$(site_public_html "$user")"
     rel="$(sanitize_relpath "$rel_raw")"
     [[ -n "$rel" ]] || err "arquivo inválido"
@@ -648,6 +761,11 @@ cmd_file_write() {
     target="$(resolve_inside "$base" "$rel")"
     tmp="$(mktemp)"
     cat >"$tmp"
+    size="$(stat -c '%s' "$tmp" 2>/dev/null || echo 0)"
+    if [[ "$size" -gt "$HELPER_MAX_FILE_BYTES" ]]; then
+        rm -f "$tmp"
+        err "arquivo maior que 2MB"
+    fi
 
     mkdir -p "$(dirname "$target")"
     cat "$tmp" >"$target"
@@ -726,6 +844,10 @@ main() {
             [[ $# -ge 2 ]] || err "uso: site-set-ssh-password <site_user> <nova_senha>"
             cmd_site_set_ssh_password "$1" "$2"
             ;;
+        site-set-ssh-password-stdin)
+            [[ $# -ge 1 ]] || err "uso: site-set-ssh-password-stdin <site_user>"
+            cmd_site_set_ssh_password_stdin "$1"
+            ;;
         site-error-log)
             [[ $# -ge 1 ]] || err "uso: site-error-log <site_user> [linhas]"
             cmd_site_error_log "$1" "${2:-80}"
@@ -746,12 +868,20 @@ main() {
             [[ $# -ge 2 ]] || err "uso: ols-set-admin <usuario> <senha>"
             cmd_ols_set_admin "$1" "$2"
             ;;
+        ols-set-admin-stdin)
+            [[ $# -ge 1 ]] || err "uso: ols-set-admin-stdin <usuario>"
+            cmd_ols_set_admin_stdin "$1"
+            ;;
         cloudflare-status) cmd_cloudflare_status ;;
         cloudflare-login-start) cmd_cloudflare_login_start ;;
         github-config-status) cmd_github_config_status ;;
         github-config-set)
             [[ $# -ge 4 ]] || err "uso: github-config-set <usuario> <token> <autor_nome> <autor_email>"
             cmd_github_config_set "$1" "$2" "$3" "$4"
+            ;;
+        github-config-set-stdin)
+            [[ $# -ge 3 ]] || err "uso: github-config-set-stdin <usuario> <autor_nome> <autor_email>"
+            cmd_github_config_set_stdin "$1" "$2" "$3"
             ;;
         github-oauth-app-set)
             [[ $# -ge 1 ]] || err "uso: github-oauth-app-set <client_id> [scopes]"
