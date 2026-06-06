@@ -668,6 +668,23 @@ function tabDescription(string $tab): string
     }
 }
 
+function panelTabDescription(string $tab): string
+{
+    switch ($tab) {
+        case 'sites':
+            return 'Provisionamento, ciclo de vida e acesso dos sites hospedados.';
+        case 'files':
+            return 'Workspace operacional para deploy, edicao e integracao GitHub.';
+        case 'database':
+            return 'Gestao de bancos, credenciais e acesso rapido ao phpMyAdmin.';
+        case 'system':
+            return 'Servicos, integracoes, diagnosticos e configuracao da stack.';
+        case 'dashboard':
+        default:
+            return 'Visao executiva da saude do servidor e dos servicos principais.';
+    }
+}
+
 $config = loadEnvFile(PANEL_CONFIG_FILE);
 $panelTitle = $config['PANEL_TITLE'] ?? 'ULTRA Web Panel';
 $panelUser = $config['PANEL_USER'] ?? 'admin';
@@ -724,23 +741,36 @@ if (!$authed) {
     };
   </script>
 </head>
-<body class="min-h-screen bg-slate-100 font-body text-slate-800 antialiased">
-  <main class="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-4 py-8 sm:px-6 lg:grid-cols-2 lg:px-8">
-    <section class="hidden rounded-3xl bg-gradient-to-br from-blue-700 to-blue-500 p-10 text-white shadow-2xl lg:block">
-      <p class="inline-flex rounded-full border border-white/35 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em]">Server Control</p>
-      <h1 class="mt-6 font-display text-4xl font-semibold leading-tight">Visual limpo para gerenciar seus sites.</h1>
-      <p class="mt-4 text-blue-100">Interface inspirada em paineis de hospedagem, com foco em clareza, velocidade e operacao do dia a dia.</p>
-      <ul class="mt-8 space-y-3 text-sm text-blue-50">
-        <li class="rounded-xl bg-white/15 px-4 py-3">Gestao de sites e servicos</li>
-        <li class="rounded-xl bg-white/15 px-4 py-3">Gerenciador de arquivos direto no navegador</li>
-        <li class="rounded-xl bg-white/15 px-4 py-3">Acesso rapido ao banco de dados</li>
-      </ul>
+<body class="min-h-screen bg-[linear-gradient(180deg,#f7f9fc_0%,#edf2f7_100%)] font-body text-slate-800 antialiased">
+  <main class="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[1.15fr_0.95fr] lg:px-8">
+    <section class="hidden rounded-[32px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.78),rgba(255,255,255,0.44))] p-10 shadow-[0_30px_80px_rgba(15,23,42,0.08)] backdrop-blur lg:block">
+      <div class="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">Ultra Control</div>
+      <h1 class="mt-6 max-w-lg font-display text-4xl font-semibold leading-tight text-slate-950">Painel clean para operar hospedagem com clareza.</h1>
+      <p class="mt-4 max-w-xl text-base leading-7 text-slate-600">Uma interface administrativa mais leve, profissional e objetiva para cuidar de sites, arquivos, bancos e servicos do servidor.</p>
+      <div class="mt-8 grid gap-4 text-sm text-slate-700 xl:grid-cols-2">
+        <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-4 shadow-sm">
+          <p class="font-semibold text-slate-900">Operacao de sites</p>
+          <p class="mt-1 leading-6 text-slate-500">Provisionamento, suspensao, clone e acesso SSH sem sair do painel.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-4 shadow-sm">
+          <p class="font-semibold text-slate-900">Workspace web</p>
+          <p class="mt-1 leading-6 text-slate-500">Arquivos, GitHub, edicao rapida e acompanhamentos de deploy num fluxo unico.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-4 shadow-sm">
+          <p class="font-semibold text-slate-900">Banco e phpMyAdmin</p>
+          <p class="mt-1 leading-6 text-slate-500">Gestao de credenciais e acesso operacional ao ambiente de dados.</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-4 shadow-sm">
+          <p class="font-semibold text-slate-900">Visao do servidor</p>
+          <p class="mt-1 leading-6 text-slate-500">Metricas, servicos e diagnosticos com leitura simples e executiva.</p>
+        </div>
+      </div>
     </section>
 
-    <section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
+    <section class="rounded-[32px] border border-white/80 bg-white/90 p-6 shadow-[0_30px_80px_rgba(15,23,42,0.08)] backdrop-blur sm:p-8">
       <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">ULTRA PANEL</p>
       <h2 class="mt-3 font-display text-3xl font-semibold text-slate-900"><?= h($panelTitle) ?></h2>
-      <p class="mt-2 text-sm text-slate-500">Acesso administrativo protegido.</p>
+      <p class="mt-2 text-sm text-slate-500">Acesso administrativo protegido com foco em rotina operacional.</p>
 
       <?php if ($flash): ?>
         <div class="mt-5 rounded-xl border px-4 py-3 text-sm <?= h(flashUiClass((string) ($flash['type'] ?? 'error'))) ?>">
@@ -1861,7 +1891,7 @@ $memoryPercent = (float) ($serverMetrics['memory']['percent'] ?? 0);
 $diskRootPercent = (float) ($serverMetrics['disk']['root']['percent'] ?? 0);
 $uptimeSeconds = (int) ($serverMetrics['uptime']['seconds'] ?? 0);
 $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
-$activeTabDescription = tabDescription($tab);
+$activeTabDescription = panelTabDescription($tab);
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -1882,43 +1912,251 @@ $activeTabDescription = tabDescription($tab);
             display: ['Outfit', 'sans-serif']
           },
           colors: {
-            panel: {
-              950: '#06131f',
-              900: '#0b1f32',
-              800: '#12304b',
-              700: '#19476c',
-              500: '#2f7db8'
+            brand: {
+              50: '#eff8ff',
+              100: '#dbeefe',
+              200: '#bfdffd',
+              500: '#2f7db8',
+              600: '#25689b',
+              700: '#1e537c'
             }
           },
           boxShadow: {
-            panel: '0 16px 45px rgba(15, 23, 42, 0.08)',
-            nav: '0 14px 30px rgba(6, 19, 31, 0.22)'
+            panel: '0 24px 60px rgba(15, 23, 42, 0.07)',
+            soft: '0 14px 30px rgba(15, 23, 42, 0.05)'
           }
         }
       }
     };
   </script>
-</head>
-<body class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(47,125,184,0.16),_transparent_36%),linear-gradient(180deg,#f8fafc_0%,#eef4f8_100%)] font-body text-slate-800 antialiased">
-  <div class="min-h-screen lg:grid lg:grid-cols-[320px_1fr]">
-    <aside class="relative overflow-hidden border-b border-panel-800 bg-panel-950 px-4 py-5 text-slate-100 shadow-nav lg:min-h-screen lg:border-b-0 lg:border-r lg:px-5">
-      <div class="pointer-events-none absolute inset-0">
-        <div class="absolute -left-16 top-0 h-44 w-44 rounded-full bg-blue-500/18 blur-3xl"></div>
-        <div class="absolute right-0 top-28 h-40 w-40 rounded-full bg-cyan-400/10 blur-3xl"></div>
-        <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-      </div>
+  <style>
+    :root {
+      --panel-accent: #2f7db8;
+    }
 
-      <div class="relative">
-        <div class="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+    .panel-app {
+      position: relative;
+    }
+
+    .panel-sidebar {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(247, 250, 252, 0.86) 100%);
+      box-shadow: inset -1px 0 0 rgba(226, 232, 240, 0.85);
+      backdrop-filter: blur(18px);
+    }
+
+    .panel-sidebar-inner {
+      position: sticky;
+      top: 1.25rem;
+    }
+
+    .panel-brand {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(226, 232, 240, 0.96);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 247, 251, 0.94) 100%);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+    }
+
+    .panel-brand::after {
+      content: "";
+      position: absolute;
+      right: -1.5rem;
+      top: -1rem;
+      width: 8rem;
+      height: 8rem;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(191, 223, 253, 0.85), rgba(191, 223, 253, 0));
+      pointer-events: none;
+    }
+
+    .panel-brand .text-slate-300 {
+      color: #64748b !important;
+    }
+
+    .panel-nav-group-title {
+      margin-bottom: 0.625rem;
+      padding-left: 0.25rem;
+      font-size: 0.69rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+
+    .panel-nav-link {
+      display: flex;
+      gap: 0.85rem;
+      border-radius: 1.25rem;
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      background: rgba(255, 255, 255, 0.7);
+      padding: 0.9rem;
+      color: #334155;
+      transition: all 0.18s ease;
+    }
+
+    .panel-nav-link:hover {
+      border-color: rgba(191, 219, 254, 1);
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+      transform: translateY(-1px);
+    }
+
+    .panel-nav-link.is-active {
+      border-color: rgba(147, 197, 253, 0.95);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(239, 248, 255, 0.96) 100%);
+      color: #0f172a;
+      box-shadow: 0 18px 32px rgba(47, 125, 184, 0.12);
+    }
+
+    .panel-nav-icon {
+      display: flex;
+      height: 2.75rem;
+      width: 2.75rem;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      border-radius: 1rem;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(248, 250, 252, 0.95);
+      color: #64748b;
+      transition: all 0.18s ease;
+    }
+
+    .panel-nav-link.is-active .panel-nav-icon {
+      border-color: rgba(147, 197, 253, 0.8);
+      background: rgba(239, 248, 255, 1);
+      color: var(--panel-accent);
+    }
+
+    .panel-sidebar-stat {
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(255, 255, 255, 0.76);
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+    }
+
+    .panel-logout {
+      border: 1px solid rgba(203, 213, 225, 0.9);
+      background: rgba(255, 255, 255, 0.84);
+      color: #334155;
+      transition: all 0.18s ease;
+    }
+
+    .panel-logout:hover {
+      border-color: rgba(148, 163, 184, 0.45);
+      background: rgba(255, 255, 255, 1);
+      box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+    }
+
+    .panel-main {
+      position: relative;
+    }
+
+    .panel-topbar {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.95);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(249, 251, 253, 0.92) 100%);
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.07);
+      backdrop-filter: blur(18px);
+    }
+
+    .panel-topbar::after {
+      content: "";
+      position: absolute;
+      inset: auto -2rem -2rem auto;
+      width: 11rem;
+      height: 11rem;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(219, 238, 254, 0.95), rgba(219, 238, 254, 0));
+      pointer-events: none;
+    }
+
+    .panel-chip {
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+    }
+
+    .panel-main .shadow-panel,
+    .panel-main .rounded-2xl.border.border-slate-200.bg-white,
+    .panel-main .rounded-xl.border.border-slate-200.bg-white,
+    .panel-main .rounded-xl.border.border-slate-200.bg-slate-50,
+    .panel-main .rounded-2xl.border.border-slate-200.bg-slate-50 {
+      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.05);
+    }
+
+    .panel-main .bg-slate-50 {
+      background-color: rgba(248, 250, 252, 0.92) !important;
+    }
+
+    .panel-main .border-slate-200 {
+      border-color: rgba(226, 232, 240, 0.95) !important;
+    }
+
+    .panel-main input:not([type="checkbox"]):not([type="hidden"]):not([type="radio"]):not([type="file"]),
+    .panel-main select,
+    .panel-main textarea {
+      border-radius: 0.95rem !important;
+      border-color: #d7e0ea !important;
+      background: rgba(255, 255, 255, 0.98) !important;
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+    }
+
+    .panel-main input:not([type="checkbox"]):not([type="hidden"]):not([type="radio"]):not([type="file"]):focus,
+    .panel-main select:focus,
+    .panel-main textarea:focus {
+      border-color: rgba(47, 125, 184, 0.6) !important;
+      box-shadow: 0 0 0 4px rgba(47, 125, 184, 0.14) !important;
+      outline: none;
+    }
+
+    .panel-main table thead {
+      background: rgba(248, 250, 252, 0.96) !important;
+    }
+
+    .panel-main table tbody tr {
+      transition: background-color 0.16s ease;
+    }
+
+    .panel-main table tbody tr:hover {
+      background: rgba(248, 250, 252, 0.82) !important;
+    }
+
+    .panel-main button {
+      transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+    }
+
+    .panel-main button:hover {
+      transform: translateY(-1px);
+      filter: saturate(1.03);
+    }
+
+    .panel-main pre {
+      border: 1px solid rgba(226, 232, 240, 0.9);
+    }
+
+    @media (max-width: 1023px) {
+      .panel-sidebar-inner {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[linear-gradient(180deg,#f7f9fc_0%,#edf2f7_100%)] font-body text-slate-800 antialiased">
+  <div class="panel-app min-h-screen lg:grid lg:grid-cols-[290px_1fr]">
+    <aside class="panel-sidebar border-b border-slate-200 px-4 py-5 lg:min-h-screen lg:border-b-0 lg:px-5">
+      <div class="panel-sidebar-inner">
+        <div class="panel-brand rounded-[28px] p-4">
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="inline-flex rounded-full border border-blue-400/30 bg-blue-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.26em] text-blue-100">Ultra Control</p>
-              <h1 class="mt-3 font-display text-2xl font-semibold text-white"><?= h($panelTitle) ?></h1>
-              <p class="mt-1 text-sm text-slate-300">Painel operacional com visual mais sólido, limpo e orientado a rotina.</p>
+              <p class="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-sky-700">Ultra Panel</p>
+              <h1 class="mt-3 font-display text-2xl font-semibold text-slate-950"><?= h($panelTitle) ?></h1>
+              <p class="mt-1 text-sm leading-6 text-slate-500">Rotina operacional com uma interface leve, limpa e pronta para producao.</p>
             </div>
-            <div class="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-right">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">Painel</p>
-              <p class="mt-1 text-sm font-semibold text-white"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
+            <div class="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-right shadow-sm">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Painel</p>
+              <p class="mt-1 max-w-[112px] truncate text-sm font-semibold text-slate-900"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
             </div>
           </div>
         </div>
@@ -1926,7 +2164,7 @@ $activeTabDescription = tabDescription($tab);
         <nav class="mt-6 space-y-5">
           <?php foreach ($navGroups as $groupLabel => $groupTabs): ?>
             <div>
-              <p class="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400"><?= h($groupLabel) ?></p>
+              <p class="panel-nav-group-title"><?= h($groupLabel) ?></p>
               <div class="space-y-2">
                 <?php foreach ($groupTabs as $key): ?>
                   <?php
@@ -1945,18 +2183,18 @@ $activeTabDescription = tabDescription($tab);
                       $badgeText = 'Live';
                   }
                   ?>
-                  <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="group flex items-start gap-3 rounded-2xl border px-3 py-3 transition <?= $active ? 'border-blue-400/30 bg-gradient-to-r from-blue-500/18 to-cyan-400/8 text-white shadow-lg shadow-blue-950/30' : 'border-white/8 bg-white/[0.03] text-slate-200 hover:border-white/15 hover:bg-white/[0.06]' ?>">
-                    <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border <?= $active ? 'border-blue-300/20 bg-blue-400/15 text-blue-100' : 'border-white/10 bg-white/[0.06] text-slate-300 group-hover:text-white' ?>">
+                  <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="panel-nav-link <?= $active ? 'is-active' : '' ?>">
+                    <span class="panel-nav-icon">
                       <?= tabIcon($key) ?>
                     </span>
                     <span class="min-w-0 flex-1">
                       <span class="flex items-center justify-between gap-3">
                         <span class="text-sm font-semibold"><?= h($label) ?></span>
                         <?php if ($badgeText !== ''): ?>
-                          <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] <?= $active ? 'bg-white/10 text-white' : 'bg-white/8 text-slate-300' ?>"><?= h($badgeText) ?></span>
+                          <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] <?= $active ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500' ?>"><?= h($badgeText) ?></span>
                         <?php endif; ?>
                       </span>
-                      <span class="mt-1 block text-xs leading-5 <?= $active ? 'text-blue-100/90' : 'text-slate-400 group-hover:text-slate-300' ?>"><?= h(tabDescription($key)) ?></span>
+                      <span class="mt-1 block text-xs leading-5 <?= $active ? 'text-slate-600' : 'text-slate-500' ?>"><?= h(panelTabDescription($key)) ?></span>
                     </span>
                   </a>
                 <?php endforeach; ?>
@@ -1966,53 +2204,49 @@ $activeTabDescription = tabDescription($tab);
         </nav>
 
         <div class="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <div class="panel-sidebar-stat rounded-2xl p-4">
             <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Sites</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-white"><?= $totalSites ?></p>
-            <p class="mt-1 text-xs text-slate-400">Base total publicada</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= $totalSites ?></p>
+            <p class="mt-1 text-xs text-slate-500">Base total publicada</p>
           </div>
-          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <div class="panel-sidebar-stat rounded-2xl p-4">
             <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Suspensos</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-amber-300"><?= $suspendedSites ?></p>
-            <p class="mt-1 text-xs text-slate-400">Exigem atenção operacional</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-amber-600"><?= $suspendedSites ?></p>
+            <p class="mt-1 text-xs text-slate-500">Exigem atencao operacional</p>
           </div>
-          <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <div class="panel-sidebar-stat rounded-2xl p-4">
             <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Tunnel</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-emerald-300"><?= $activeTunnelSites ?></p>
-            <p class="mt-1 text-xs text-slate-400">Sites com Cloudflare ativo</p>
+            <p class="mt-2 font-display text-3xl font-semibold text-emerald-600"><?= $activeTunnelSites ?></p>
+            <p class="mt-1 text-xs text-slate-500">Sites com Cloudflare ativo</p>
           </div>
         </div>
 
         <form method="post" class="mt-6">
           <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
           <input type="hidden" name="action" value="logout">
-          <button type="submit" class="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.08]">Sair do painel</button>
+          <button type="submit" class="panel-logout w-full rounded-2xl px-4 py-3 text-sm font-semibold">Sair do painel</button>
         </form>
       </div>
     </aside>
 
-    <main class="p-4 sm:p-6 lg:p-8">
-      <header class="relative mb-6 overflow-hidden rounded-3xl border border-white/70 bg-white/85 p-5 shadow-panel backdrop-blur sm:p-6">
-        <div class="pointer-events-none absolute inset-0">
-          <div class="absolute right-0 top-0 h-32 w-40 rounded-full bg-blue-100 blur-3xl"></div>
-          <div class="absolute left-10 bottom-0 h-24 w-32 rounded-full bg-cyan-100 blur-3xl"></div>
-        </div>
+    <main class="panel-main p-4 sm:p-6 lg:p-8">
+      <header class="panel-topbar mb-6 rounded-[30px] p-5 sm:p-6">
         <div class="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div class="max-w-3xl">
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">Area ativa</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Painel operacional</p>
             <h2 class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= h($activeTabTitle) ?></h2>
             <p class="mt-2 text-sm leading-6 text-slate-600"><?= h($activeTabDescription) ?></p>
           </div>
           <div class="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
-            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+            <div class="panel-chip rounded-2xl px-4 py-3">
               <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Dominio</p>
               <p class="mt-2 truncate text-sm font-semibold text-slate-900"><?= h($panelDomain !== '' ? $panelDomain : 'nao configurado') ?></p>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+            <div class="panel-chip rounded-2xl px-4 py-3">
               <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Uptime</p>
               <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatUptimeUi($uptimeSeconds)) ?></p>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/75 px-4 py-3">
+            <div class="panel-chip rounded-2xl px-4 py-3">
               <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Capacidade</p>
               <p class="mt-2 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
             </div>
@@ -2395,24 +2629,24 @@ $activeTabDescription = tabDescription($tab);
 
           <?php if ($fileSite !== ''): ?>
             <div class="mt-5 grid gap-4 xl:grid-cols-4">
-              <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 p-4 text-white xl:col-span-2">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Caminho atual</p>
+              <div class="rounded-2xl border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-4 text-slate-900 shadow-panel xl:col-span-2">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Caminho atual</p>
                 <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
                   <?php foreach ($fileBreadcrumbs as $index => $crumb): ?>
                     <?php $isLastCrumb = $index === array_key_last($fileBreadcrumbs); ?>
-                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => (string) $crumb['path']])) ?>" class="rounded-full px-3 py-1.5 <?= $isLastCrumb ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-100 hover:bg-white/20' ?> transition">
+                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => (string) $crumb['path']])) ?>" class="rounded-full px-3 py-1.5 <?= $isLastCrumb ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' ?> transition">
                       <?= h((string) $crumb['label']) ?>
                     </a>
                     <?php if (!$isLastCrumb): ?>
-                      <span class="text-slate-500">/</span>
+                      <span class="text-slate-300">/</span>
                     <?php endif; ?>
                   <?php endforeach; ?>
                 </div>
-                <p class="mt-3 break-all text-sm text-slate-300">/home/<?= h($fileSite) ?>/public_html<?= $fileCurrentPath !== '' ? '/' . h($fileCurrentPath) : '' ?></p>
+                <p class="mt-3 break-all text-sm text-slate-500">/home/<?= h($fileSite) ?>/public_html<?= $fileCurrentPath !== '' ? '/' . h($fileCurrentPath) : '' ?></p>
                 <div class="mt-4 flex flex-wrap gap-2">
-                  <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => ''])) ?>" class="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">Raiz do site</a>
+                  <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => ''])) ?>" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100">Raiz do site</a>
                   <?php if ($fileParentPath !== '' || $filePath !== ''): ?>
-                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $fileParentPath])) ?>" class="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20">Voltar um nivel</a>
+                    <a href="<?= h(baseUrl(['tab' => 'files', 'site' => $fileSite, 'path' => $fileParentPath])) ?>" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100">Voltar um nivel</a>
                   <?php endif; ?>
                 </div>
               </div>
