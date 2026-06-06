@@ -359,6 +359,15 @@ function sanitizeCronCommand(string $value): string
     return $value;
 }
 
+function sanitizeSiteSshPassword(string $value): string
+{
+    if ($value === '' || strlen($value) < 8 || strlen($value) > 120 || str_contains($value, "\n") || str_contains($value, "\r") || str_contains($value, ':')) {
+        return '';
+    }
+
+    return $value;
+}
+
 function sanitizeGithubUsername(string $value): string
 {
     $value = trim($value);
@@ -960,6 +969,38 @@ try {
                 setFlash('success', 'Acao executada para ' . $siteUser . '.');
             } else {
                 setFlash('error', 'Falha na acao: ' . $stderr);
+            }
+            redirectTo(baseUrl(['tab' => 'sites']));
+        }
+
+        if ($action === 'site_set_ssh_password') {
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            $password = sanitizeSiteSshPassword((string) ($_POST['site_ssh_password'] ?? ''));
+            $passwordConfirm = (string) ($_POST['site_ssh_password_confirm'] ?? '');
+
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para alterar senha SSH.');
+            }
+            if ($password === '') {
+                throw new RuntimeException('A senha SSH deve ter entre 8 e 120 caracteres, sem quebra de linha nem dois-pontos.');
+            }
+            if (!hash_equals($password, $passwordConfirm)) {
+                throw new RuntimeException('A confirmacao da senha SSH nao confere.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-set-ssh-password', $siteUser, $password]);
+            $payload = decodeJson($out);
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $domain = (string) ($payload['domain'] ?? '');
+                $msg = 'Senha SSH atualizada para o usuario ' . $siteUser . '.';
+                if ($domain !== '') {
+                    $msg .= ' Site: ' . $domain;
+                }
+                setFlash('success', $msg);
+            } else {
+                $apiError = (string) ($payload['error'] ?? '');
+                $detail = $apiError !== '' ? $apiError : ($stderr !== '' ? $stderr : 'falha desconhecida');
+                setFlash('error', 'Falha ao atualizar senha SSH: ' . $detail);
             }
             redirectTo(baseUrl(['tab' => 'sites']));
         }
@@ -2103,6 +2144,38 @@ $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
               </label>
               <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700">Clonar site</button>
             </div>
+          </form>
+
+          <form method="post" class="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h4 class="font-display text-lg font-semibold text-slate-900">Acesso SSH do usuario do site</h4>
+            <p class="mt-1 text-sm text-slate-600">Atualize a senha Linux do usuario do site para acesso via SSH e SFTP.</p>
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="site_set_ssh_password">
+
+            <div class="mt-4 grid gap-3 md:grid-cols-4">
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                <select name="site_user" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                  <?php foreach ($fileSites as $site): ?>
+                    <?php $user = (string) ($site['user'] ?? ''); ?>
+                    <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Nova senha SSH</label>
+                <input type="password" name="site_ssh_password" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Minimo de 8 caracteres">
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Confirmar senha</label>
+                <input type="password" name="site_ssh_password_confirm" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Repita a nova senha">
+              </div>
+              <div class="flex items-end">
+                <button type="submit" class="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700">Atualizar senha SSH</button>
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs text-slate-500">Use entre 8 e 120 caracteres. Evite usar `:` para nao invalidar a troca da senha no sistema.</p>
           </form>
 
           <div class="overflow-x-auto rounded-xl border border-slate-200">

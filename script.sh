@@ -277,6 +277,12 @@ github_autor_nome_valido() {
     [[ -n "$name" && ${#name} -le 80 && "$name" != *$'\n'* && "$name" != *$'\r'* ]]
 }
 
+senha_ssh_site_valida() {
+    local senha="${1:-}"
+    [[ -n "$senha" && ${#senha} -ge 8 && ${#senha} -le 120 ]] || return 1
+    [[ "$senha" != *$'\n'* && "$senha" != *$'\r'* && "$senha" != *:* ]]
+}
+
 github_token_valido() {
     local token="${1:-}"
     [[ -n "$token" && ${#token} -ge 20 && "$token" != *$'\n'* && "$token" != *$'\r'* && "$token" != *[[:space:]]* ]]
@@ -3693,6 +3699,41 @@ api_trocar_senha_banco_por_usuario() {
     fi
 }
 
+api_trocar_senha_ssh_por_usuario() {
+    local user="${1:-}"
+    local nova_senha="${2:-}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+    if ! senha_ssh_site_valida "$nova_senha"; then
+        api_json_erro "Senha SSH invalida. Use entre 8 e 120 caracteres, sem quebra de linha nem dois-pontos."
+        return 1
+    fi
+
+    printf '%s:%s\n' "$user" "$nova_senha" | chpasswd || {
+        api_json_erro "Falha ao atualizar a senha SSH do usuario do site."
+        return 1
+    }
+
+    local domain
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            '{ok:true,site_user:$user,domain:$domain}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
 api_ver_logs_erro_por_usuario() {
     local user="${1:-}"
     local linhas="${2:-80}"
@@ -5040,6 +5081,10 @@ api_main() {
         db-rotate-password)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api db-rotate-password <site_user>"; return 1; }
             api_trocar_senha_banco_por_usuario "$1"
+            ;;
+        site-set-ssh-password)
+            [[ $# -ge 2 ]] || { api_json_erro "uso: __api site-set-ssh-password <site_user> <nova_senha>"; return 1; }
+            api_trocar_senha_ssh_por_usuario "$1" "$2"
             ;;
         site-error-log)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-error-log <site_user> [linhas]"; return 1; }

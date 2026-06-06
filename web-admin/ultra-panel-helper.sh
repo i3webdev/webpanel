@@ -315,6 +315,15 @@ cmd_db_rotate_password() {
     run_script_api db-rotate-password "$user"
 }
 
+cmd_site_set_ssh_password() {
+    local user="${1:-}"
+    local password="${2:-}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    [[ -n "$password" ]] || err "senha SSH obrigatoria"
+    run_script_api site-set-ssh-password "$user" "$password"
+}
+
 cmd_site_error_log() {
     local user="${1:-}"
     local lines="${2:-80}"
@@ -712,6 +721,10 @@ main() {
         db-rotate-password)
             [[ $# -ge 1 ]] || err "uso: db-rotate-password <site_user>"
             cmd_db_rotate_password "$1"
+            ;;
+        site-set-ssh-password)
+            [[ $# -ge 2 ]] || err "uso: site-set-ssh-password <site_user> <nova_senha>"
+            cmd_site_set_ssh_password "$1" "$2"
             ;;
         site-error-log)
             [[ $# -ge 1 ]] || err "uso: site-error-log <site_user> [linhas]"
