@@ -685,6 +685,43 @@ function panelTabDescription(string $tab): string
     }
 }
 
+function uiIcon(string $name, string $classes = 'h-5 w-5'): string
+{
+    $svg = '';
+
+    switch ($name) {
+        case 'globe':
+            $svg = '<path d="M12 3c4.97 0 9 4.03 9 9s-4.03 9-9 9-9-4.03-9-9 4.03-9 9-9Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.2 4 5.5 4 9s-1.5 6.8-4 9"/><path d="M12 3c-2.5 2.2-4 5.5-4 9s1.5 6.8 4 9"/>';
+            break;
+        case 'pulse':
+            $svg = '<path d="M3 12h4l2-5 4 10 2-5h6"/>';
+            break;
+        case 'spark':
+            $svg = '<path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="m19 16 .9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16Z"/>';
+            break;
+        case 'folder':
+            $svg = '<path d="M3 7a2 2 0 0 1 2-2h4.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>';
+            break;
+        case 'database':
+            $svg = '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v5c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 11v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/>';
+            break;
+        case 'server':
+            $svg = '<rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01"/><path d="M8 17h.01"/>';
+            break;
+        case 'shield':
+            $svg = '<path d="M12 3 5 6v5c0 4.2 2.7 8 7 10 4.3-2 7-5.8 7-10V6l-7-3Z"/>';
+            break;
+        case 'bolt':
+            $svg = '<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>';
+            break;
+        default:
+            $svg = '<circle cx="12" cy="12" r="8"/>';
+            break;
+    }
+
+    return '<svg viewBox="0 0 24 24" fill="none" class="' . h($classes) . '" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' . $svg . '</svg>';
+}
+
 $config = loadEnvFile(PANEL_CONFIG_FILE);
 $panelTitle = $config['PANEL_TITLE'] ?? 'ULTRA Web Panel';
 $panelUser = $config['PANEL_USER'] ?? 'admin';
@@ -1892,6 +1929,7 @@ $diskRootPercent = (float) ($serverMetrics['disk']['root']['percent'] ?? 0);
 $uptimeSeconds = (int) ($serverMetrics['uptime']['seconds'] ?? 0);
 $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
 $activeTabDescription = panelTabDescription($tab);
+$activeSitesCount = max(0, $totalSites - $suspendedSites);
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -1950,6 +1988,11 @@ $activeTabDescription = panelTabDescription($tab);
     .panel-sidebar-inner {
       position: sticky;
       top: 1.25rem;
+      display: flex;
+      min-height: calc(100vh - 2.5rem);
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
     }
 
     .panel-brand {
@@ -1959,6 +2002,23 @@ $activeTabDescription = panelTabDescription($tab);
       background: linear-gradient(180deg, #2373ab 0%, #1f5f8f 100%);
       box-shadow: 0 18px 40px rgba(31, 95, 143, 0.18);
       color: #f8fbff;
+    }
+
+    .panel-brand-mark {
+      display: flex;
+      height: 3.75rem;
+      width: 3.75rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 1.35rem;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.12);
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #fff;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
     }
 
     .panel-brand::after {
@@ -1989,16 +2049,35 @@ $activeTabDescription = panelTabDescription($tab);
       color: #7b8ca1;
     }
 
-    .panel-nav-link {
+    .panel-nav-stack {
       display: flex;
+      flex-direction: column;
       gap: 0.75rem;
       align-items: center;
+      width: 100%;
+    }
+
+    .panel-nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      align-items: center;
+      width: 100%;
+    }
+
+    .panel-nav-link {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 0.95rem;
       border: 1px solid transparent;
       background: rgba(255, 255, 255, 0.72);
-      padding: 0.78rem 0.82rem;
+      padding: 0.78rem;
       color: #334155;
       transition: all 0.18s ease;
+      width: 100%;
+      max-width: 3.6rem;
     }
 
     .panel-nav-link:hover {
@@ -2028,6 +2107,38 @@ $activeTabDescription = panelTabDescription($tab);
       transition: all 0.18s ease;
     }
 
+    .panel-nav-tooltip {
+      position: absolute;
+      left: calc(100% + 0.8rem);
+      top: 50%;
+      transform: translateY(-50%) translateX(-6px);
+      border-radius: 0.85rem;
+      border: 1px solid rgba(203, 213, 225, 0.92);
+      background: rgba(15, 23, 42, 0.96);
+      padding: 0.55rem 0.8rem;
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: #f8fafc;
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+      box-shadow: 0 18px 30px rgba(15, 23, 42, 0.22);
+      z-index: 20;
+    }
+
+    .panel-nav-link:hover .panel-nav-tooltip,
+    .panel-nav-link:focus-visible .panel-nav-tooltip {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    .panel-sidebar-divider {
+      height: 1px;
+      width: 2.2rem;
+      background: rgba(148, 163, 184, 0.3);
+    }
+
     .panel-nav-link.is-active .panel-nav-icon {
       border-color: rgba(147, 197, 253, 0.8);
       background: rgba(239, 248, 255, 1);
@@ -2038,6 +2149,23 @@ $activeTabDescription = panelTabDescription($tab);
       border: 1px solid rgba(226, 232, 240, 0.95);
       background: rgba(255, 255, 255, 0.8);
       box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+      width: 100%;
+    }
+
+    .panel-sidebar-mini {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      width: 100%;
+    }
+
+    .panel-sidebar-mini-badge {
+      display: inline-flex;
+      height: 2rem;
+      width: 2rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.8rem;
     }
 
     .panel-logout {
@@ -2051,6 +2179,15 @@ $activeTabDescription = panelTabDescription($tab);
       border-color: rgba(148, 163, 184, 0.45);
       background: rgba(255, 255, 255, 1);
       box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+    }
+
+    .panel-logout-icon {
+      display: inline-flex;
+      height: 2.85rem;
+      width: 2.85rem;
+      align-items: center;
+      justify-content: center;
+      border-radius: 1rem;
     }
 
     .panel-main {
@@ -2182,92 +2319,97 @@ $activeTabDescription = panelTabDescription($tab);
     @media (max-width: 1023px) {
       .panel-sidebar-inner {
         position: static;
+        min-height: auto;
+        flex-direction: row;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      .panel-nav-stack {
+        flex-direction: row;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .panel-nav-group {
+        flex-direction: row;
+        width: auto;
+      }
+
+      .panel-sidebar-mini {
+        display: none;
+      }
+
+      .panel-nav-tooltip {
+        display: none;
       }
     }
   </style>
 </head>
 <body class="min-h-screen bg-[linear-gradient(180deg,#f7f9fc_0%,#edf2f7_100%)] font-body text-slate-800 antialiased">
-  <div class="panel-app min-h-screen lg:grid lg:grid-cols-[290px_1fr]">
-    <aside class="panel-sidebar border-b border-slate-200 px-4 py-5 lg:min-h-screen lg:border-b-0 lg:px-5">
+  <div class="panel-app min-h-screen lg:grid lg:grid-cols-[108px_1fr]">
+    <aside class="panel-sidebar border-b border-slate-200 px-3 py-5 lg:min-h-screen lg:border-b-0 lg:px-4">
       <div class="panel-sidebar-inner">
-        <div class="panel-brand rounded-[28px] p-4">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-white">Hosting Control</p>
-              <h1 class="mt-3 font-display text-2xl font-semibold"><?= h($panelTitle) ?></h1>
-              <p class="mt-1 text-sm leading-6 text-sky-50/90">Interface administrativa inspirada em paineis de hospedagem classicos.</p>
-            </div>
-            <div class="rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-right shadow-sm">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">Painel</p>
-              <p class="mt-1 max-w-[112px] truncate text-sm font-semibold text-white"><?= h($panelDomain !== '' ? $panelDomain : 'sem dominio') ?></p>
-            </div>
+        <div class="panel-brand rounded-[28px] p-3">
+          <div class="flex flex-col items-center gap-2 text-center" title="<?= h($panelDomain !== '' ? $panelDomain : $panelTitle) ?>">
+            <div class="panel-brand-mark">UP</div>
+            <span class="inline-flex h-2 w-2 rounded-full bg-emerald-300"></span>
           </div>
         </div>
 
-        <nav class="mt-6 space-y-5">
+        <nav class="panel-nav-stack mt-2" aria-label="Navegacao principal">
           <?php foreach ($navGroups as $groupLabel => $groupTabs): ?>
-            <div>
-              <p class="panel-nav-group-title"><?= h($groupLabel) ?></p>
-              <div class="space-y-2">
+            <div class="panel-nav-group">
                 <?php foreach ($groupTabs as $key): ?>
                   <?php
                   $active = $tab === $key;
                   $label = $tabs[$key];
-                  $badgeText = '';
+                  $tooltip = $label;
                   if ($key === 'sites') {
-                      $badgeText = (string) $totalSites;
+                      $tooltip .= ' • ' . $totalSites . ' sites';
                   } elseif ($key === 'files' && $fileSite !== '') {
-                      $badgeText = $fileSite;
+                      $tooltip .= ' • ' . $fileSite;
                   } elseif ($key === 'database' && $phpmyadminDomain !== '') {
-                      $badgeText = 'DB';
+                      $tooltip .= ' • phpMyAdmin';
                   } elseif ($key === 'system') {
-                      $badgeText = 'Stack';
+                      $tooltip .= ' • stack';
                   } elseif ($key === 'dashboard') {
-                      $badgeText = 'Live';
+                      $tooltip .= ' • visao geral';
                   }
                   ?>
-                  <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="panel-nav-link <?= $active ? 'is-active' : '' ?>">
+                  <?php $tooltipUi = preg_replace('/[^A-Za-z0-9 .:_-]+/u', ' - ', $tooltip) ?? $tooltip; ?>
+                  <a href="<?= h(baseUrl(['tab' => $key])) ?>" class="panel-nav-link <?= $active ? 'is-active' : '' ?>" title="<?= h($tooltipUi) ?>" aria-label="<?= h($tooltipUi) ?>">
                     <span class="panel-nav-icon">
                       <?= tabIcon($key) ?>
                     </span>
-                    <span class="min-w-0 flex-1">
-                      <span class="flex items-center justify-between gap-3">
-                        <span class="text-sm font-semibold"><?= h($label) ?></span>
-                        <?php if ($badgeText !== ''): ?>
-                          <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] <?= $active ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500' ?>"><?= h($badgeText) ?></span>
-                        <?php endif; ?>
-                      </span>
-                      <span class="mt-1 block text-xs leading-5 <?= $active ? 'text-slate-600' : 'text-slate-500' ?>"><?= h(panelTabDescription($key)) ?></span>
-                    </span>
+                    <span class="panel-nav-tooltip"><?= h($tooltipUi) ?></span>
                   </a>
                 <?php endforeach; ?>
-              </div>
+              <?php if ($groupLabel !== array_key_last($navGroups)): ?>
+                <span class="panel-sidebar-divider" aria-hidden="true"></span>
+              <?php endif; ?>
             </div>
           <?php endforeach; ?>
         </nav>
 
-        <div class="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-          <div class="panel-sidebar-stat rounded-2xl p-4">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Sites</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= $totalSites ?></p>
-            <p class="mt-1 text-xs text-slate-500">Base total publicada</p>
+        <div class="panel-sidebar-mini mt-auto">
+          <div class="panel-sidebar-stat rounded-2xl px-3 py-3 text-center" title="<?= h((string) $totalSites) ?> sites cadastrados">
+            <span class="panel-sidebar-mini-badge bg-sky-100 text-sky-700"><?= uiIcon('globe', 'h-4 w-4') ?></span>
+            <p class="mt-2 font-display text-lg font-semibold text-slate-950"><?= $totalSites ?></p>
           </div>
-          <div class="panel-sidebar-stat rounded-2xl p-4">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Suspensos</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-amber-600"><?= $suspendedSites ?></p>
-            <p class="mt-1 text-xs text-slate-500">Exigem atencao operacional</p>
-          </div>
-          <div class="panel-sidebar-stat rounded-2xl p-4">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Tunnel</p>
-            <p class="mt-2 font-display text-3xl font-semibold text-emerald-600"><?= $activeTunnelSites ?></p>
-            <p class="mt-1 text-xs text-slate-500">Sites com Cloudflare ativo</p>
+          <div class="panel-sidebar-stat rounded-2xl px-3 py-3 text-center" title="<?= h((string) $activeSitesCount) ?> sites online">
+            <span class="panel-sidebar-mini-badge bg-emerald-100 text-emerald-700"><?= uiIcon('spark', 'h-4 w-4') ?></span>
+            <p class="mt-2 font-display text-lg font-semibold text-emerald-600"><?= $activeSitesCount ?></p>
           </div>
         </div>
 
-        <form method="post" class="mt-6">
+        <form method="post" class="mt-2">
           <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
           <input type="hidden" name="action" value="logout">
-          <button type="submit" class="panel-logout w-full rounded-2xl px-4 py-3 text-sm font-semibold">Sair do painel</button>
+          <button type="submit" class="panel-logout panel-logout-icon w-full" title="Sair do painel" aria-label="Sair do painel">
+            <?= uiIcon('shield', 'h-5 w-5') ?>
+          </button>
         </form>
       </div>
     </aside>
@@ -2281,16 +2423,31 @@ $activeTabDescription = panelTabDescription($tab);
           </div>
           <div class="grid gap-2 sm:grid-cols-3 lg:min-w-[430px]">
             <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
-              <p class="panel-chip-label">Sites ativos</p>
-              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) ($totalSites - $suspendedSites)) ?> online</p>
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 inline-flex rounded-lg bg-sky-100 p-2 text-sky-700"><?= uiIcon('globe', 'h-4 w-4') ?></span>
+                <div>
+                  <p class="panel-chip-label">Sites ativos</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) $activeSitesCount) ?> online</p>
+                </div>
+              </div>
             </div>
             <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
-              <p class="panel-chip-label">Cloudflare</p>
-              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) $activeTunnelSites) ?> com tunnel</p>
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 inline-flex rounded-lg bg-emerald-100 p-2 text-emerald-700"><?= uiIcon('spark', 'h-4 w-4') ?></span>
+                <div>
+                  <p class="panel-chip-label">Cloudflare</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900"><?= h((string) $activeTunnelSites) ?> com tunnel</p>
+                </div>
+              </div>
             </div>
             <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
-              <p class="panel-chip-label">Capacidade</p>
-              <p class="mt-1 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 inline-flex rounded-lg bg-amber-100 p-2 text-amber-700"><?= uiIcon('pulse', 'h-4 w-4') ?></span>
+                <div>
+                  <p class="panel-chip-label">Capacidade</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900"><?= h(formatPercentUi(max($cpuPercent, $memoryPercent, $diskRootPercent))) ?></p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2300,7 +2457,10 @@ $activeTabDescription = panelTabDescription($tab);
         <div class="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div class="max-w-3xl">
             <p class="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Area de gerenciamento</p>
-            <h2 class="mt-2 font-display text-3xl font-semibold text-slate-950"><?= h($activeTabTitle) ?></h2>
+            <div class="mt-2 flex items-center gap-3">
+              <span class="inline-flex rounded-2xl bg-sky-100 p-3 text-sky-700"><?= tabIcon($tab) ?></span>
+              <h2 class="font-display text-3xl font-semibold text-slate-950"><?= h($activeTabTitle) ?></h2>
+            </div>
             <p class="mt-2 text-sm leading-6 text-slate-600"><?= h($activeTabDescription) ?></p>
           </div>
           <div class="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
@@ -2409,7 +2569,10 @@ $activeTabDescription = panelTabDescription($tab);
 
         <section class="panel-module mt-5 rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
           <div class="panel-section-title">
-            <h3 class="font-display text-xl font-semibold text-slate-900">Status de servicos</h3>
+            <h3 class="flex items-center gap-3 font-display text-xl font-semibold text-slate-900">
+              <span class="inline-flex rounded-xl bg-sky-100 p-2 text-sky-700"><?= uiIcon('server', 'h-4 w-4') ?></span>
+              Status de servicos
+            </h3>
             <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600"><?= h((string) count($serviceStatus)) ?> itens</span>
           </div>
           <div class="mt-4 flex flex-wrap gap-2">
@@ -2467,7 +2630,10 @@ $activeTabDescription = panelTabDescription($tab);
       <?php if ($tab === 'sites'): ?>
         <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
           <div class="panel-section-title mb-4 flex items-center justify-between gap-4">
-            <h3 class="font-display text-xl font-semibold text-slate-900">Gerenciamento de sites</h3>
+            <h3 class="flex items-center gap-3 font-display text-xl font-semibold text-slate-900">
+              <span class="inline-flex rounded-xl bg-sky-100 p-2 text-sky-700"><?= uiIcon('globe', 'h-4 w-4') ?></span>
+              Gerenciamento de sites
+            </h3>
             <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700"><?= $totalSites ?> registros</span>
           </div>
 
@@ -2658,7 +2824,10 @@ $activeTabDescription = panelTabDescription($tab);
           <div class="panel-section-title flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Workspace</p>
-              <h3 class="mt-1 font-display text-xl font-semibold text-slate-900">Gerenciador de arquivos</h3>
+              <div class="mt-1 flex items-center gap-3">
+                <span class="inline-flex rounded-xl bg-sky-100 p-2 text-sky-700"><?= uiIcon('folder', 'h-4 w-4') ?></span>
+                <h3 class="font-display text-xl font-semibold text-slate-900">Gerenciador de arquivos</h3>
+              </div>
               <p class="mt-1 text-sm text-slate-500">Navegue pelos arquivos do site, edite rapidamente e mantenha a estrutura organizada.</p>
             </div>
             <?php if ($fileSite !== ''): ?>
@@ -3107,7 +3276,10 @@ $activeTabDescription = panelTabDescription($tab);
       <?php if ($tab === 'database'): ?>
         <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
           <div class="panel-section-title">
-            <h3 class="font-display text-xl font-semibold text-slate-900">Acesso ao banco de dados</h3>
+            <h3 class="flex items-center gap-3 font-display text-xl font-semibold text-slate-900">
+              <span class="inline-flex rounded-xl bg-sky-100 p-2 text-sky-700"><?= uiIcon('database', 'h-4 w-4') ?></span>
+              Acesso ao banco de dados
+            </h3>
             <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-600"><?= $phpmyadminDomain !== '' ? 'phpMyAdmin online' : 'sem dominio' ?></span>
           </div>
           <p class="mt-2 text-sm text-slate-600">Abra o phpMyAdmin, publique o dominio dele e gerencie credenciais dos bancos principais e adicionais.</p>
@@ -3198,7 +3370,10 @@ $activeTabDescription = panelTabDescription($tab);
       <?php if ($tab === 'system'): ?>
         <section class="panel-module rounded-2xl border border-slate-200 bg-white p-5 pl-6 shadow-panel">
           <div class="panel-section-title flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h3 class="font-display text-xl font-semibold text-slate-900">Sistema</h3>
+            <h3 class="flex items-center gap-3 font-display text-xl font-semibold text-slate-900">
+              <span class="inline-flex rounded-xl bg-sky-100 p-2 text-sky-700"><?= uiIcon('server', 'h-4 w-4') ?></span>
+              Sistema
+            </h3>
             <form method="post">
               <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
               <input type="hidden" name="action" value="restart_services">
