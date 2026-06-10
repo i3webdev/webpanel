@@ -475,6 +475,35 @@ function sanitizeSiteSshPassword(string $value): string
     return $value;
 }
 
+function sanitizeSshPublicKey(string $value): string
+{
+    $value = trim($value);
+    if ($value === '' || strlen($value) > 16384 || preg_match('/[\r\n]/', $value) === 1) {
+        return '';
+    }
+
+    $parts = preg_split('/\s+/', $value, 3);
+    if (!is_array($parts) || count($parts) < 2) {
+        return '';
+    }
+
+    $allowedTypes = [
+        'ssh-ed25519',
+        'ssh-rsa',
+        'ecdsa-sha2-nistp256',
+        'ecdsa-sha2-nistp384',
+        'ecdsa-sha2-nistp521',
+    ];
+    if (!in_array((string) $parts[0], $allowedTypes, true)) {
+        return '';
+    }
+    if (preg_match('/^[A-Za-z0-9+\/=]+$/', (string) $parts[1]) !== 1) {
+        return '';
+    }
+
+    return $value;
+}
+
 function sanitizeGithubUsername(string $value): string
 {
     $value = trim($value);
@@ -1206,6 +1235,61 @@ try {
                 $apiError = (string) ($payload['error'] ?? '');
                 $detail = $apiError !== '' ? $apiError : ($stderr !== '' ? $stderr : 'falha desconhecida');
                 setFlash('error', 'Falha ao atualizar senha SSH: ' . $detail);
+            }
+            redirectTo(baseUrl(['tab' => 'sites']));
+        }
+
+        if ($action === 'site_add_ssh_key') {
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+            $publicKey = sanitizeSshPublicKey((string) ($_POST['site_ssh_public_key'] ?? ''));
+
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para adicionar chave SSH.');
+            }
+            if ($publicKey === '') {
+                throw new RuntimeException('Cole uma unica chave publica SSH valida em uma unica linha.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-add-ssh-key-stdin', $siteUser], $publicKey);
+            $payload = decodeJson($out);
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $domain = (string) ($payload['domain'] ?? '');
+                $status = (string) ($payload['status'] ?? 'added');
+                $msg = $status === 'already_exists'
+                    ? 'A chave SSH ja estava autorizada para o usuario ' . $siteUser . '.'
+                    : 'Chave SSH adicionada para o usuario ' . $siteUser . '.';
+                if ($domain !== '') {
+                    $msg .= ' Site: ' . $domain;
+                }
+                setFlash('success', $msg);
+            } else {
+                $apiError = (string) ($payload['error'] ?? '');
+                $detail = $apiError !== '' ? $apiError : ($stderr !== '' ? $stderr : 'falha desconhecida');
+                setFlash('error', 'Falha ao adicionar chave SSH: ' . $detail);
+            }
+            redirectTo(baseUrl(['tab' => 'sites']));
+        }
+
+        if ($action === 'site_disable_ssh_password') {
+            $siteUser = sanitizeSiteUser((string) ($_POST['site_user'] ?? ''));
+
+            if ($siteUser === '') {
+                throw new RuntimeException('Site invalido para bloquear login SSH por senha.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-disable-ssh-password', $siteUser]);
+            $payload = decodeJson($out);
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $domain = (string) ($payload['domain'] ?? '');
+                $msg = 'Login SSH por senha bloqueado para o usuario ' . $siteUser . '.';
+                if ($domain !== '') {
+                    $msg .= ' Site: ' . $domain;
+                }
+                setFlash('success', $msg);
+            } else {
+                $apiError = (string) ($payload['error'] ?? '');
+                $detail = $apiError !== '' ? $apiError : ($stderr !== '' ? $stderr : 'falha desconhecida');
+                setFlash('error', 'Falha ao bloquear login SSH por senha: ' . $detail);
             }
             redirectTo(baseUrl(['tab' => 'sites']));
         }
@@ -2874,6 +2958,61 @@ $activeSitesCount = max(0, $totalSites - $suspendedSites);
             </div>
 
             <p class="mt-3 text-xs text-slate-500">Use entre 8 e 120 caracteres. Evite usar `:` para nao invalidar a troca da senha no sistema.</p>
+          </form>
+
+          <form method="post" class="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h4 class="font-display text-lg font-semibold text-slate-900">Chave publica SSH do usuario do site</h4>
+            <p class="mt-1 text-sm text-slate-600">Autorize uma chave publica para acesso SSH e SFTP sem depender da senha do usuario.</p>
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="site_add_ssh_key">
+
+            <div class="mt-4 grid gap-3 md:grid-cols-4">
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                <select name="site_user" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                  <?php foreach ($fileSites as $site): ?>
+                    <?php $user = (string) ($site['user'] ?? ''); ?>
+                    <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <div class="md:col-span-2">
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Chave publica SSH</label>
+                <textarea name="site_ssh_public_key" rows="3" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... voce@maquina"></textarea>
+              </div>
+              <div class="flex items-end">
+                <button type="submit" class="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">Adicionar chave SSH</button>
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs text-slate-500">Cole somente a chave publica em uma unica linha. Nao envie a chave privada.</p>
+          </form>
+
+          <form method="post" class="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <h4 class="font-display text-lg font-semibold text-slate-900">Bloquear login SSH por senha</h4>
+            <p class="mt-1 text-sm text-slate-700">Mantem o acesso por chave publica autorizada e bloqueia novas autenticacoes por senha para o usuario do site.</p>
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+            <input type="hidden" name="action" value="site_disable_ssh_password">
+
+            <div class="mt-4 grid gap-3 md:grid-cols-4">
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Site</label>
+                <select name="site_user" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20">
+                  <?php foreach ($fileSites as $site): ?>
+                    <?php $user = (string) ($site['user'] ?? ''); ?>
+                    <option value="<?= h($user) ?>"><?= h($user . ' (' . ((string) ($site['domain'] ?? '-')) . ')') ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <div class="md:col-span-2 flex items-center rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-700">
+                Use esta opcao somente depois de confirmar que sua chave publica SSH ja foi adicionada e testada.
+              </div>
+              <div class="flex items-end">
+                <button type="submit" class="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700">Bloquear login por senha</button>
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs text-slate-500">Isso executa o bloqueio da senha Linux do usuario. O acesso por chave continua dependendo de `authorized_keys` e da configuracao do SSH do servidor.</p>
           </form>
 
           <div class="overflow-x-auto rounded-xl border border-slate-200">

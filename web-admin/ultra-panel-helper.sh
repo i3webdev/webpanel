@@ -405,6 +405,20 @@ cmd_site_set_ssh_password_stdin() {
     run_script_api site-set-ssh-password-stdin "$user"
 }
 
+cmd_site_disable_ssh_password() {
+    local user="${1:-}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api site-disable-ssh-password "$user"
+}
+
+cmd_site_add_ssh_key_stdin() {
+    local user="${1:-}"
+
+    site_user_exists "$user" || err "site nao encontrado"
+    run_script_api site-add-ssh-key-stdin "$user"
+}
+
 cmd_site_error_log() {
     local user="${1:-}"
     local lines="${2:-80}"
@@ -847,6 +861,14 @@ main() {
         site-set-ssh-password-stdin)
             [[ $# -ge 1 ]] || err "uso: site-set-ssh-password-stdin <site_user>"
             cmd_site_set_ssh_password_stdin "$1"
+            ;;
+        site-disable-ssh-password)
+            [[ $# -ge 1 ]] || err "uso: site-disable-ssh-password <site_user>"
+            cmd_site_disable_ssh_password "$1"
+            ;;
+        site-add-ssh-key-stdin)
+            [[ $# -ge 1 ]] || err "uso: site-add-ssh-key-stdin <site_user>"
+            cmd_site_add_ssh_key_stdin "$1"
             ;;
         site-error-log)
             [[ $# -ge 1 ]] || err "uso: site-error-log <site_user> [linhas]"

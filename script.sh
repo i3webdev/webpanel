@@ -283,6 +283,26 @@ senha_ssh_site_valida() {
     [[ "$senha" != *$'\n'* && "$senha" != *$'\r'* && "$senha" != *:* ]]
 }
 
+chave_ssh_publica_valida() {
+    local chave="${1:-}"
+    [[ -n "$chave" && ${#chave} -le 16384 ]] || return 1
+    [[ "$chave" != *$'\n'* && "$chave" != *$'\r'* ]] || return 1
+
+    local tipo corpo comentario_restante
+    IFS=' ' read -r tipo corpo comentario_restante <<< "$chave"
+    [[ -n "$tipo" && -n "$corpo" ]] || return 1
+
+    case "$tipo" in
+        ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    [[ "$corpo" =~ ^[A-Za-z0-9+/=]+$ ]]
+}
+
 github_token_valido() {
     local token="${1:-}"
     [[ -n "$token" && ${#token} -ge 20 && "$token" != *$'\n'* && "$token" != *$'\r'* && "$token" != *[[:space:]]* ]]
@@ -3741,6 +3761,103 @@ api_trocar_senha_ssh_por_usuario_stdin() {
     api_trocar_senha_ssh_por_usuario "$user" "$nova_senha"
 }
 
+api_bloquear_login_ssh_por_senha_por_usuario() {
+    local user="${1:-}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+
+    passwd -l "$user" >/dev/null 2>&1 || {
+        api_json_erro "Falha ao bloquear login SSH por senha para o usuario do site."
+        return 1
+    }
+
+    local domain
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            '{ok:true,site_user:$user,domain:$domain,password_login_locked:true}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\"}"
+    fi
+}
+
+api_adicionar_chave_ssh_por_usuario() {
+    local user="${1:-}"
+    local chave_publica="${2:-}"
+
+    if ! usuario_valido "$user"; then
+        api_json_erro "Usuario invalido."
+        return 1
+    fi
+    if [[ ! -d "${SITES_ROOT}/${user}" || ! -d "${VHOSTS_DIR}/${user}" ]]; then
+        api_json_erro "Site nao encontrado."
+        return 1
+    fi
+    if ! chave_ssh_publica_valida "$chave_publica"; then
+        api_json_erro "Chave publica SSH invalida. Cole uma unica chave publica nos formatos suportados."
+        return 1
+    fi
+
+    local root_dir ssh_dir authorized_keys domain status
+    root_dir="${SITES_ROOT}/${user}"
+    ssh_dir="${root_dir}/.ssh"
+    authorized_keys="${ssh_dir}/authorized_keys"
+
+    mkdir -p "$ssh_dir" || {
+        api_json_erro "Falha ao preparar diretorio .ssh do usuario do site."
+        return 1
+    }
+    chmod 700 "$ssh_dir" || true
+    chown "$user:$user" "$ssh_dir" >/dev/null 2>&1 || true
+
+    touch "$authorized_keys" || {
+        api_json_erro "Falha ao preparar arquivo authorized_keys do usuario do site."
+        return 1
+    }
+
+    if grep -Fqx -- "$chave_publica" "$authorized_keys" 2>/dev/null; then
+        status="already_exists"
+    else
+        printf '%s\n' "$chave_publica" >> "$authorized_keys" || {
+            api_json_erro "Falha ao adicionar chave publica SSH ao usuario do site."
+            return 1
+        }
+        status="added"
+    fi
+
+    chown "$user:$user" "$authorized_keys" >/dev/null 2>&1 || true
+    chmod 600 "$authorized_keys" >/dev/null 2>&1 || true
+
+    domain="$(api_dominio_por_usuario "$user" || true)"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -n \
+            --arg user "$user" \
+            --arg domain "$domain" \
+            --arg status "$status" \
+            '{ok:true,site_user:$user,domain:$domain,status:$status}'
+    else
+        echo "{\"ok\":true,\"site_user\":\"${user}\",\"status\":\"${status}\"}"
+    fi
+}
+
+api_adicionar_chave_ssh_por_usuario_stdin() {
+    local user="${1:-}"
+    local chave_publica
+    chave_publica="$(cat)"
+    api_adicionar_chave_ssh_por_usuario "$user" "$chave_publica"
+}
+
 api_ver_logs_erro_por_usuario() {
     local user="${1:-}"
     local linhas="${2:-80}"
@@ -5112,6 +5229,14 @@ api_main() {
         site-set-ssh-password-stdin)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-set-ssh-password-stdin <site_user>"; return 1; }
             api_trocar_senha_ssh_por_usuario_stdin "$1"
+            ;;
+        site-disable-ssh-password)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-disable-ssh-password <site_user>"; return 1; }
+            api_bloquear_login_ssh_por_senha_por_usuario "$1"
+            ;;
+        site-add-ssh-key-stdin)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-add-ssh-key-stdin <site_user>"; return 1; }
+            api_adicionar_chave_ssh_por_usuario_stdin "$1"
             ;;
         site-error-log)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api site-error-log <site_user> [linhas]"; return 1; }
