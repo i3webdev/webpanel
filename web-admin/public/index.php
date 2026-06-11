@@ -1048,6 +1048,108 @@ try {
             redirectTo(baseUrl(['tab' => 'sites']));
         }
 
+        if ($action === 'site_residue_check') {
+            $tab = 'sites';
+            $domain = sanitizeDomainInput((string) ($_POST['residue_domain'] ?? ''));
+            if ($domain === '') {
+                throw new RuntimeException('Dominio invalido para verificar residuos.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-residue-check', $domain]);
+            $payload = decodeJson($out);
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $residueItems = isset($payload['residues']) && is_array($payload['residues']) ? array_values($payload['residues']) : [];
+                $candidateUsers = isset($payload['users']) && is_array($payload['users']) ? array_values($payload['users']) : [];
+                $details = [];
+                foreach ($candidateUsers as $candidateUser) {
+                    $candidateUser = trim((string) $candidateUser);
+                    if ($candidateUser !== '') {
+                        $details[] = 'Usuario relacionado: ' . $candidateUser;
+                    }
+                }
+                foreach ($residueItems as $item) {
+                    $item = trim((string) $item);
+                    if ($item !== '') {
+                        $details[] = 'Residuo: ' . $item;
+                    }
+                }
+
+                if ($residueItems === []) {
+                    $actionResult = [
+                        'type' => 'success',
+                        'title' => 'Nenhum residuo encontrado',
+                        'text' => 'Nenhum resquicio operacional foi encontrado para ' . $domain . '.',
+                        'details' => $details,
+                    ];
+                } else {
+                    $actionResult = [
+                        'type' => 'error',
+                        'title' => 'Residuos detectados',
+                        'text' => 'O dominio ' . $domain . ' ainda possui residuos tecnicos que bloqueiam a recriacao completa.',
+                        'details' => $details,
+                    ];
+                }
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha ao verificar residuos',
+                    'text' => $detail,
+                ];
+            }
+        }
+
+        if ($action === 'site_residue_cleanup') {
+            $tab = 'sites';
+            $domain = sanitizeDomainInput((string) ($_POST['residue_domain'] ?? ''));
+            if ($domain === '') {
+                throw new RuntimeException('Dominio invalido para limpar residuos.');
+            }
+
+            [$code, $out, $stderr] = panelExec(['site-residue-cleanup', $domain]);
+            $payload = decodeJson($out);
+            $residueItems = isset($payload['residues']) && is_array($payload['residues']) ? array_values($payload['residues']) : [];
+            $remainingItems = isset($payload['remaining']) && is_array($payload['remaining']) ? array_values($payload['remaining']) : [];
+            $candidateUsers = isset($payload['users']) && is_array($payload['users']) ? array_values($payload['users']) : [];
+            $details = [];
+            foreach ($candidateUsers as $candidateUser) {
+                $candidateUser = trim((string) $candidateUser);
+                if ($candidateUser !== '') {
+                    $details[] = 'Usuario relacionado: ' . $candidateUser;
+                }
+            }
+            foreach ($residueItems as $item) {
+                $item = trim((string) $item);
+                if ($item !== '') {
+                    $details[] = 'Encontrado: ' . $item;
+                }
+            }
+            foreach ($remainingItems as $item) {
+                $item = trim((string) $item);
+                if ($item !== '') {
+                    $details[] = 'Restante: ' . $item;
+                }
+            }
+
+            if ($code === 0 && ($payload['ok'] ?? false) === true) {
+                $actionResult = [
+                    'type' => 'success',
+                    'title' => 'Residuos removidos',
+                    'text' => 'A limpeza total do dominio ' . $domain . ' foi concluida sem backup.',
+                    'details' => $details,
+                ];
+            } else {
+                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $actionResult = [
+                    'type' => 'error',
+                    'title' => 'Falha na limpeza de residuos',
+                    'text' => $detail,
+                    'details' => $details,
+                ];
+            }
+        }
+
         if ($action === 'site_clone') {
             $sourceUser = sanitizeSiteUser((string) ($_POST['source_user'] ?? ''));
             $targetDomain = sanitizeDomainInput((string) ($_POST['target_domain'] ?? ''));
@@ -2144,6 +2246,7 @@ $uptimeSeconds = (int) ($serverMetrics['uptime']['seconds'] ?? 0);
 $activeTabTitle = $tabs[$tab] ?? 'Dashboard';
 $activeTabDescription = panelTabDescription($tab);
 $activeSitesCount = max(0, $totalSites - $suspendedSites);
+$siteResidueDomainValue = sanitizeDomainInput((string) ($_POST['residue_domain'] ?? ''));
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -2885,6 +2988,29 @@ $activeSitesCount = max(0, $totalSites - $suspendedSites);
                 <input type="checkbox" name="create_tunnel" value="1" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
                 Criar tunnel Cloudflare para o site
               </label>
+            </div>
+          </form>
+
+          <form method="post" class="mb-5 rounded-xl border border-rose-200 bg-rose-50/70 p-4" onsubmit="if (event.submitter && event.submitter.value === 'site_residue_cleanup') { return confirm('Limpar TODOS os residuos desse dominio sem backup? Isso remove usuario Linux, arquivos, vhost, bancos e tunnel remanescentes.'); } return true;">
+            <h4 class="font-display text-lg font-semibold text-slate-900">Limpeza total de residuos por dominio</h4>
+            <p class="mt-1 text-sm text-slate-700">Use quando um dominio ja foi removido teoricamente, mas ainda ficou bloqueado por vhost, home, usuario Linux, banco ou tunnel residual. Esta limpeza e definitiva e nao gera backup.</p>
+            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
+
+            <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,2fr)_auto_auto]">
+              <div>
+                <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Dominio</label>
+                <input name="residue_domain" value="<?= h($siteResidueDomainValue) ?>" placeholder="ex: news.i3lab.site" required class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20">
+              </div>
+              <div class="flex items-end">
+                <button type="submit" name="action" value="site_residue_check" class="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Verificar residuos</button>
+              </div>
+              <div class="flex items-end">
+                <button type="submit" name="action" value="site_residue_cleanup" class="w-full rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700">Limpar tudo</button>
+              </div>
+            </div>
+
+            <div class="mt-3 rounded-xl border border-rose-200 bg-white/80 px-4 py-3 text-xs text-slate-600">
+              Remove sem backup: home do site, vhost do OpenLiteSpeed, referencias no `httpd_config.conf`, usuario/grupo Linux, bancos, usuarios de banco, tunnel Cloudflare e arquivos auxiliares residuais.
             </div>
           </form>
 

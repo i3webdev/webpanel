@@ -649,6 +649,21 @@ cmd_site_remove() {
     cache_invalidate "list-sites"
 }
 
+cmd_site_residue_check() {
+    local domain_raw="${1:-}"
+
+    [[ -n "$domain_raw" ]] || err "domínio obrigatório"
+    run_script_api check-site-residues "$domain_raw"
+}
+
+cmd_site_residue_cleanup() {
+    local domain_raw="${1:-}"
+
+    [[ -n "$domain_raw" ]] || err "domínio obrigatório"
+    run_script_api cleanup-site-residues "$domain_raw"
+    cache_invalidate "list-sites"
+}
+
 cmd_cron_add() {
     local user="${1:-}"
     local expression="${2:-}"
@@ -962,6 +977,14 @@ main() {
         site-remove)
             [[ $# -ge 1 ]] || err "uso: site-remove <user> [backup:0|1]"
             cmd_site_remove "$1" "${2:-1}"
+            ;;
+        site-residue-check)
+            [[ $# -ge 1 ]] || err "uso: site-residue-check <dominio>"
+            cmd_site_residue_check "$1"
+            ;;
+        site-residue-cleanup)
+            [[ $# -ge 1 ]] || err "uso: site-residue-cleanup <dominio>"
+            cmd_site_residue_cleanup "$1"
             ;;
         cron-add)
             [[ $# -ge 3 ]] || err "uso: cron-add <user> <expressao> <comando> [executar_em_public_html:0|1]"

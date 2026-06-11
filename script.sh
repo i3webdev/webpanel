@@ -166,6 +166,29 @@ validar_dominio() {
     [[ "$dominio" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]
 }
 
+usuario_legado_por_dominio() {
+    local dominio="$1"
+    dominio="$(normalizar_dominio "$dominio")"
+    validar_dominio "$dominio" || return 1
+
+    echo "$dominio" | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-'
+}
+
+usuarios_relacionados_dominio() {
+    local dominio="$1"
+    dominio="$(normalizar_dominio "$dominio")"
+    validar_dominio "$dominio" || return 1
+
+    local user user_legado
+    user="$(nome_site_para_usuario "$dominio")" || return 1
+    user_legado="$(usuario_legado_por_dominio "$dominio" || true)"
+
+    printf '%s\n' "$user"
+    if [[ -n "$user_legado" && "$user_legado" != "$user" ]]; then
+        printf '%s\n' "$user_legado"
+    fi
+}
+
 resolver_usuario_por_dominio() {
     local dominio="$1"
     dominio="$(normalizar_dominio "$dominio")"
@@ -184,7 +207,7 @@ resolver_usuario_por_dominio() {
 
     # Compatibilidade com sites antigos criados usando apenas o primeiro label do domínio.
     local user_legado
-    user_legado="$(echo "$dominio" | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+    user_legado="$(usuario_legado_por_dominio "$dominio" || true)"
     if [[ -n "$user_legado" ]] && [[ -d "${SITES_ROOT}/${user_legado}" || -d "${VHOSTS_DIR}/${user_legado}" ]]; then
         echo "$user_legado"
         return 0
@@ -226,7 +249,7 @@ remover_diretorio_seguro() {
         return 1
     fi
 
-    [[ -d "$alvo" ]] && rm -rf "$alvo"
+    [[ -e "$alvo" || -L "$alvo" ]] && rm -rf "$alvo"
 }
 
 gerar_senha() {
@@ -1732,6 +1755,220 @@ remover_vhost_httpd_conf() {
     mv "${HTTPD_CONF}.tmp" "$HTTPD_CONF"
 }
 
+detectar_residuos_site() {
+    local user="$1"
+    local root_dir="${2:-${SITES_ROOT}/${user}}"
+    local item resumo=""
+
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        if [[ -z "$resumo" ]]; then
+            resumo="$item"
+        else
+            resumo="${resumo}, ${item}"
+        fi
+    done < <(listar_residuos_site "$user" "$root_dir")
+
+    [[ -n "$resumo" ]] && echo "$resumo"
+}
+
+usuario_protegido_limpeza_residuos() {
+    local user="$1"
+    [[ "$user" == "$WEB_PANEL_USER" || "$user" == "phpmyadmin_srv" || "$user" == "Example" ]]
+}
+
+mysql_disponivel() {
+    command -v "$MYSQL_BIN" >/dev/null 2>&1
+}
+
+httpd_conf_tem_usuario() {
+    local user="$1"
+    [[ -f "$HTTPD_CONF" ]] || return 1
+
+    awk -v user="$user" '
+        $0 ~ ("^virtualhost[[:space:]]+" user "[[:space:]]*\\{") { found=1; exit }
+        $0 ~ ("map[[:space:]]+" user "([[:space:]]+|$)") { found=1; exit }
+        END { exit(found ? 0 : 1) }
+    ' "$HTTPD_CONF"
+}
+
+listar_bancos_residuais_site() {
+    local user="$1"
+    local db
+
+    mysql_disponivel || return 0
+
+    while IFS= read -r db; do
+        [[ -n "$db" ]] || continue
+        case "$db" in
+            "${user}_db"|${user}_*_db)
+                printf '%s\n' "$db"
+                ;;
+        esac
+    done < <($MYSQL_BIN -Nse "SHOW DATABASES;" 2>/dev/null || true)
+}
+
+listar_usuarios_banco_residuais_site() {
+    local user="$1"
+    local dbuser
+
+    mysql_disponivel || return 0
+
+    while IFS= read -r dbuser; do
+        [[ -n "$dbuser" ]] || continue
+        case "$dbuser" in
+            "${user}_user"|${user}_*_user)
+                printf '%s\n' "$dbuser"
+                ;;
+        esac
+    done < <($MYSQL_BIN -Nse "SELECT User FROM mysql.user;" 2>/dev/null || true)
+}
+
+listar_arquivos_root_residuais_site() {
+    local user="$1"
+    local arquivo
+
+    for arquivo in "/root/${user}_db.txt" "/root/${user}_db_extra.txt" "/root/${user}_wp.txt"; do
+        if [[ -e "$arquivo" || -L "$arquivo" ]]; then
+            printf '%s\n' "$arquivo"
+        fi
+    done
+}
+
+listar_residuos_site() {
+    local user="$1"
+    local root_dir="${2:-${SITES_ROOT}/${user}}"
+    local tunnel_id db dbuser arquivo
+
+    if [[ -e "$root_dir" || -L "$root_dir" ]]; then
+        printf 'home:%s\n' "$root_dir"
+    fi
+
+    if [[ -e "${VHOSTS_DIR}/${user}" || -L "${VHOSTS_DIR}/${user}" ]]; then
+        printf 'vhost:%s\n' "${VHOSTS_DIR}/${user}"
+    fi
+
+    if httpd_conf_tem_usuario "$user"; then
+        printf 'httpd_conf:%s\n' "$HTTPD_CONF"
+    fi
+
+    if id "$user" >/dev/null 2>&1; then
+        printf 'linux_user:%s\n' "$user"
+    fi
+
+    if getent group "$user" >/dev/null 2>&1; then
+        printf 'linux_group:%s\n' "$user"
+    fi
+
+    if [[ -e "/etc/systemd/system/cloudflared-${user}.service" || -L "/etc/systemd/system/cloudflared-${user}.service" ]]; then
+        printf 'cloudflare_service:%s\n' "/etc/systemd/system/cloudflared-${user}.service"
+    fi
+
+    if [[ -e "$(cf_site_dir "$user")" || -L "$(cf_site_dir "$user")" ]]; then
+        printf 'cloudflare_dir:%s\n' "$(cf_site_dir "$user")"
+    fi
+
+    if command -v cloudflared >/dev/null 2>&1; then
+        tunnel_id="$(cf_tunnel_id_por_nome "$user" || true)"
+        if [[ -n "$tunnel_id" ]]; then
+            printf 'cloudflare_tunnel:%s\n' "$tunnel_id"
+        fi
+    fi
+
+    while IFS= read -r db; do
+        [[ -n "$db" ]] || continue
+        printf 'database:%s\n' "$db"
+    done < <(listar_bancos_residuais_site "$user")
+
+    while IFS= read -r dbuser; do
+        [[ -n "$dbuser" ]] || continue
+        printf 'database_user:%s\n' "$dbuser"
+    done < <(listar_usuarios_banco_residuais_site "$user")
+
+    while IFS= read -r arquivo; do
+        [[ -n "$arquivo" ]] || continue
+        printf 'root_file:%s\n' "$arquivo"
+    done < <(listar_arquivos_root_residuais_site "$user")
+}
+
+listar_residuos_dominio() {
+    local dominio="$1"
+    local user item
+
+    while IFS= read -r user; do
+        [[ -n "$user" ]] || continue
+        while IFS= read -r item; do
+            [[ -n "$item" ]] || continue
+            printf '%s => %s\n' "$user" "$item"
+        done < <(listar_residuos_site "$user")
+    done < <(usuarios_relacionados_dominio "$dominio")
+}
+
+detectar_residuos_dominio() {
+    local dominio="$1"
+    local item resumo=""
+
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        if [[ -z "$resumo" ]]; then
+            resumo="$item"
+        else
+            resumo="${resumo}; ${item}"
+        fi
+    done < <(listar_residuos_dominio "$dominio")
+
+    [[ -n "$resumo" ]] && echo "$resumo"
+}
+
+limpar_residuos_site_total() {
+    local user="$1"
+    local root_dir="${SITES_ROOT}/${user}"
+    local db dbuser arquivo residuos_restantes
+
+    if ! usuario_valido "$user"; then
+        erro "Usuário inválido para limpar resíduos: ${user}"
+        return 1
+    fi
+
+    if usuario_protegido_limpeza_residuos "$user"; then
+        erro "Limpeza de resíduos bloqueada para usuário protegido: ${user}"
+        return 1
+    fi
+
+    remover_tunnel_site "$user" || true
+
+    if mysql_disponivel; then
+        while IFS= read -r db; do
+            [[ -n "$db" ]] || continue
+            $MYSQL_BIN -e "DROP DATABASE IF EXISTS \`${db}\`;" >/dev/null 2>&1 || true
+        done < <(listar_bancos_residuais_site "$user")
+
+        while IFS= read -r dbuser; do
+            [[ -n "$dbuser" ]] || continue
+            $MYSQL_BIN -e "DROP USER IF EXISTS '${dbuser}'@'localhost';" >/dev/null 2>&1 || true
+        done < <(listar_usuarios_banco_residuais_site "$user")
+
+        $MYSQL_BIN -e "FLUSH PRIVILEGES;" >/dev/null 2>&1 || true
+    fi
+
+    remover_diretorio_seguro "$VHOSTS_DIR" "${VHOSTS_DIR}/${user}" || true
+    remover_vhost_httpd_conf "$user" || true
+    remover_diretorio_seguro "$SITES_ROOT" "$root_dir" || true
+
+    if id "$user" >/dev/null 2>&1; then
+        userdel -f "$user" >/dev/null 2>&1 || userdel "$user" >/dev/null 2>&1 || true
+    fi
+    groupdel "$user" >/dev/null 2>&1 || true
+
+    while IFS= read -r arquivo; do
+        [[ -n "$arquivo" ]] || continue
+        rm -f "$arquivo"
+    done < <(listar_arquivos_root_residuais_site "$user")
+
+    residuos_restantes="$(detectar_residuos_site "$user" "$root_dir")"
+    [[ -z "$residuos_restantes" ]]
+}
+
 baixar_wp_cli() {
     if ! command -v wp >/dev/null 2>&1; then
         curl -L https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /usr/local/bin/wp
@@ -2251,14 +2488,16 @@ clonar_site() {
     local root_destino="${SITES_ROOT}/${user_destino}"
     local user_destino_existente
     user_destino_existente="$(resolver_usuario_por_dominio "$dominio_destino" || true)"
+    local residuos_destino
+    residuos_destino="$(detectar_residuos_dominio "$dominio_destino")"
 
     if [[ ! -d "$root_origem" ]]; then
         erro "Site de origem não encontrado."
         return
     fi
 
-    if [[ -n "$user_destino_existente" && -d "${SITES_ROOT}/${user_destino_existente}" ]]; then
-        erro "Destino já existe."
+    if [[ -n "$residuos_destino" ]]; then
+        erro "Destino já existe ou possui resíduos remanescentes (${user_destino_existente:-$user_destino}). Itens detectados: ${residuos_destino}"
         return
     fi
 
@@ -2431,8 +2670,10 @@ criar_site_ultra() {
     local root_dir="${SITES_ROOT}/${user}"
     local user_existente
     user_existente="$(resolver_usuario_por_dominio "$dominio" || true)"
-    if [[ -n "$user_existente" && -d "${SITES_ROOT}/${user_existente}" ]]; then
-        erro "Esse domínio já possui site configurado (${user_existente})."
+    local residuos_dominio
+    residuos_dominio="$(detectar_residuos_dominio "$dominio")"
+    if [[ -n "$residuos_dominio" ]]; then
+        erro "Esse domínio já possui site configurado ou resíduos remanescentes (${user_existente:-$user}). Itens detectados: ${residuos_dominio}"
         return
     fi
 
@@ -2571,8 +2812,17 @@ remover_site() {
     if id "$user" >/dev/null 2>&1; then
         userdel -r "$user" >/dev/null 2>&1 || userdel "$user" || true
     fi
+    groupdel "$user" >/dev/null 2>&1 || true
 
     rm -f "/root/${user}_db.txt" "/root/${user}_db_extra.txt" "/root/${user}_wp.txt"
+
+    local residuos_restantes
+    residuos_restantes="$(detectar_residuos_site "$user" "$root_dir")"
+    if [[ -n "$residuos_restantes" ]]; then
+        erro "Remoção incompleta. Resíduos encontrados: ${residuos_restantes}"
+        [[ -n "$backup_file" ]] && echo "Backup salvo em: $backup_file"
+        return
+    fi
 
     systemctl restart lsws || true
 
@@ -2922,8 +3172,10 @@ api_criar_site() {
 
     local user_existente
     user_existente="$(resolver_usuario_por_dominio "$dominio" || true)"
-    if [[ -n "$user_existente" && -d "${SITES_ROOT}/${user_existente}" ]]; then
-        api_json_erro "Esse domínio já possui site configurado (${user_existente})."
+    local residuos_dominio
+    residuos_dominio="$(detectar_residuos_dominio "$dominio")"
+    if [[ -n "$residuos_dominio" ]]; then
+        api_json_erro "Esse domínio já possui site configurado ou resíduos remanescentes (${user_existente:-$user}). Itens detectados: ${residuos_dominio}"
         return 1
     fi
 
@@ -3129,8 +3381,10 @@ api_clonar_site() {
 
     local user_destino_existente
     user_destino_existente="$(resolver_usuario_por_dominio "$dominio_destino" || true)"
-    if [[ -n "$user_destino_existente" && -d "${SITES_ROOT}/${user_destino_existente}" ]]; then
-        api_json_erro "Domínio de destino já existe (${user_destino_existente})."
+    local residuos_destino
+    residuos_destino="$(detectar_residuos_dominio "$dominio_destino")"
+    if [[ -n "$residuos_destino" ]]; then
+        api_json_erro "Domínio de destino já existe ou possui resíduos remanescentes (${user_destino_existente:-$user_destino}). Itens detectados: ${residuos_destino}"
         return 1
     fi
 
@@ -3265,16 +3519,29 @@ api_remover_site_por_usuario() {
 
     $MYSQL_BIN -e "FLUSH PRIVILEGES;" || true
 
-    remover_diretorio_seguro "$VHOSTS_DIR" "${VHOSTS_DIR}/${user}" || true
+    remover_diretorio_seguro "$VHOSTS_DIR" "${VHOSTS_DIR}/${user}" || {
+        api_json_erro "Falha ao remover diretório do vhost do site."
+        return 1
+    }
     remover_vhost_httpd_conf "$user" || true
 
-    remover_diretorio_seguro "$SITES_ROOT" "$root_dir" || true
+    remover_diretorio_seguro "$SITES_ROOT" "$root_dir" || {
+        api_json_erro "Falha ao remover diretório home do site."
+        return 1
+    }
     if id "$user" >/dev/null 2>&1; then
         userdel -f "$user" >/dev/null 2>&1 || userdel "$user" >/dev/null 2>&1 || true
     fi
     groupdel "$user" >/dev/null 2>&1 || true
 
     rm -f "/root/${user}_db.txt" "/root/${user}_db_extra.txt" "/root/${user}_wp.txt"
+
+    local residuos_restantes
+    residuos_restantes="$(detectar_residuos_site "$user" "$root_dir")"
+    if [[ -n "$residuos_restantes" ]]; then
+        api_json_erro "Remoção incompleta. Resíduos encontrados: ${residuos_restantes}"
+        return 1
+    fi
 
     systemctl restart lsws >/dev/null 2>&1 || true
 
@@ -3283,6 +3550,98 @@ api_remover_site_por_usuario() {
     else
         echo "{\"ok\":true,\"user\":\"${user}\",\"backup\":\"${backup_file}\"}"
     fi
+}
+
+api_verificar_residuos_site_por_dominio() {
+    local dominio_raw="${1:-}"
+    local dominio
+    dominio="$(normalizar_dominio "$dominio_raw")"
+    if ! validar_dominio "$dominio"; then
+        api_json_erro "Dominio invalido para verificar residuos."
+        return 1
+    fi
+
+    local users_tmp residues_tmp users_json residues_json
+    users_tmp="$(mktemp)"
+    residues_tmp="$(mktemp)"
+
+    usuarios_relacionados_dominio "$dominio" > "$users_tmp"
+    listar_residuos_dominio "$dominio" > "$residues_tmp"
+
+    if command -v jq >/dev/null 2>&1; then
+        users_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$users_tmp")"
+        residues_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$residues_tmp")"
+        jq -n \
+            --arg domain "$dominio" \
+            --argjson users "$users_json" \
+            --argjson residues "$residues_json" \
+            '{ok:true,domain:$domain,users:$users,residues:$residues,has_residues:(($residues | length) > 0)}'
+    else
+        echo "{\"ok\":true,\"domain\":\"${dominio}\"}"
+    fi
+
+    rm -f "$users_tmp" "$residues_tmp"
+}
+
+api_limpar_residuos_site_por_dominio() {
+    local dominio_raw="${1:-}"
+    local dominio
+    dominio="$(normalizar_dominio "$dominio_raw")"
+    if ! validar_dominio "$dominio"; then
+        api_json_erro "Dominio invalido para limpar residuos."
+        return 1
+    fi
+
+    local users_tmp before_tmp after_tmp users_json before_json after_json
+    users_tmp="$(mktemp)"
+    before_tmp="$(mktemp)"
+    after_tmp="$(mktemp)"
+
+    usuarios_relacionados_dominio "$dominio" > "$users_tmp"
+
+    local user
+    while IFS= read -r user; do
+        [[ -n "$user" ]] || continue
+        if usuario_protegido_limpeza_residuos "$user"; then
+            rm -f "$users_tmp" "$before_tmp" "$after_tmp"
+            api_json_erro "Limpeza de residuos bloqueada para usuario protegido (${user})."
+            return 1
+        fi
+    done < "$users_tmp"
+
+    listar_residuos_dominio "$dominio" > "$before_tmp"
+
+    local cleanup_failed="0"
+    while IFS= read -r user; do
+        [[ -n "$user" ]] || continue
+        if ! limpar_residuos_site_total "$user"; then
+            cleanup_failed="1"
+        fi
+    done < "$users_tmp"
+
+    listar_residuos_dominio "$dominio" > "$after_tmp"
+
+    if command -v jq >/dev/null 2>&1; then
+        users_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$users_tmp")"
+        before_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$before_tmp")"
+        after_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$after_tmp")"
+        jq -n \
+            --arg domain "$dominio" \
+            --argjson users "$users_json" \
+            --argjson residues "$before_json" \
+            --argjson remaining "$after_json" \
+            --argjson cleanup_failed "$cleanup_failed" \
+            '{ok:(($remaining | length) == 0 and $cleanup_failed == 0),domain:$domain,users:$users,residues:$residues,remaining:$remaining,cleanup_failed:($cleanup_failed == 1)}'
+    else
+        echo "{\"ok\":false,\"domain\":\"${dominio}\"}"
+    fi
+
+    local possui_restos="0"
+    [[ -s "$after_tmp" ]] && possui_restos="1"
+
+    rm -f "$users_tmp" "$before_tmp" "$after_tmp"
+
+    [[ "$cleanup_failed" == "0" && "$possui_restos" == "0" ]]
 }
 
 api_cron_listar() {
@@ -5194,6 +5553,14 @@ api_main() {
         remove-site)
             [[ $# -ge 1 ]] || { api_json_erro "uso: __api remove-site <site_user> [backup:0|1]"; return 1; }
             api_remover_site_por_usuario "$1" "${2:-1}"
+            ;;
+        check-site-residues)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api check-site-residues <dominio>"; return 1; }
+            api_verificar_residuos_site_por_dominio "$1"
+            ;;
+        cleanup-site-residues)
+            [[ $# -ge 1 ]] || { api_json_erro "uso: __api cleanup-site-residues <dominio>"; return 1; }
+            api_limpar_residuos_site_por_dominio "$1"
             ;;
         cron-add)
             [[ $# -ge 3 ]] || { api_json_erro "uso: __api cron-add <site_user> <expressao> <comando> [executar_em_public_html:0|1]"; return 1; }
