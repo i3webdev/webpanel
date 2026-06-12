@@ -43,6 +43,7 @@ cor_amarela="\033[1;33m"
 cor_vermelha="\033[1;31m"
 cor_azul="\033[1;34m"
 cor_reset="\033[0m"
+ULTIMO_ERRO_LIMPEZA_RESIDUOS=""
 
 msg() { echo -e "${cor_verde}[$(date '+%H:%M:%S')] $*${cor_reset}"; }
 aviso() { echo -e "${cor_amarela}[$(date '+%H:%M:%S')] $*${cor_reset}"; }
@@ -1924,6 +1925,10 @@ limpar_residuos_site_total() {
     local user="$1"
     local root_dir="${SITES_ROOT}/${user}"
     local db dbuser arquivo residuos_restantes
+    local tentativa max_tentativas
+    local tunnel_error=""
+
+    ULTIMO_ERRO_LIMPEZA_RESIDUOS=""
 
     if ! usuario_valido "$user"; then
         erro "Usuário inválido para limpar resíduos: ${user}"
@@ -1935,7 +1940,7 @@ limpar_residuos_site_total() {
         return 1
     fi
 
-    remover_tunnel_site "$user" || true
+    tunnel_error="$(remover_tunnel_site "$user" 2>&1)" || true
 
     if mysql_disponivel; then
         while IFS= read -r db; do
@@ -1966,6 +1971,24 @@ limpar_residuos_site_total() {
     done < <(listar_arquivos_root_residuais_site "$user")
 
     residuos_restantes="$(detectar_residuos_site "$user" "$root_dir")"
+    max_tentativas=4
+    tentativa=0
+    while [[ -n "$residuos_restantes" && "$tentativa" -lt "$max_tentativas" ]]; do
+        tentativa=$((tentativa + 1))
+        sleep 1
+        residuos_restantes="$(detectar_residuos_site "$user" "$root_dir")"
+    done
+
+    if [[ -n "$residuos_restantes" ]]; then
+        if [[ -n "$tunnel_error" ]]; then
+            ULTIMO_ERRO_LIMPEZA_RESIDUOS="Falha ao remover tunnel Cloudflare: ${tunnel_error}"
+        else
+            ULTIMO_ERRO_LIMPEZA_RESIDUOS="Residuos restantes apos a limpeza: ${residuos_restantes}"
+        fi
+    elif [[ -n "$tunnel_error" ]]; then
+        ULTIMO_ERRO_LIMPEZA_RESIDUOS="Falha transitória ao remover tunnel Cloudflare: ${tunnel_error}"
+    fi
+
     [[ -z "$residuos_restantes" ]]
 }
 
@@ -2113,6 +2136,13 @@ cf_tunnel_id_por_nome() {
     fi
 }
 
+cf_tunnel_id_por_nome_json() {
+    local tunnel_name="$1"
+    local payload="$2"
+
+    printf '%s' "$payload" | jq -r --arg name "$tunnel_name" '((if type == "array" then . else [] end) | .[] | select(.name == $name) | .id)' 2>/dev/null | head -n1
+}
+
 criar_tunnel_site() {
     local user="$1"
     local dominio="$2"
@@ -2210,11 +2240,13 @@ EOF
 
 remover_tunnel_site() {
     local user="$1"
-    local tunnel_id
+    local tunnel_id=""
+    local list_output=""
+    local delete_output=""
 
     if ! usuario_valido "$user"; then
-        aviso "Usuário inválido para remover tunnel: ${user}"
-        return 0
+        echo "Usuario invalido para remover tunnel: ${user}"
+        return 1
     fi
 
     systemctl stop "cloudflared-${user}.service" >/dev/null 2>&1 || true
@@ -2222,14 +2254,52 @@ remover_tunnel_site() {
     rm -f "/etc/systemd/system/cloudflared-${user}.service"
     systemctl daemon-reload || true
 
-    tunnel_id="$(cf_tunnel_id_por_nome "$user" || true)"
-    if [[ -n "$tunnel_id" ]]; then
-        cloudflared tunnel delete "$tunnel_id" -f >/dev/null 2>&1 || true
-    else
-        cloudflared tunnel delete "$user" -f >/dev/null 2>&1 || true
+    remover_diretorio_seguro "$CLOUDFLARE_BASE_DIR" "$(cf_site_dir "$user")" || true
+
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        return 0
     fi
 
-    remover_diretorio_seguro "$CLOUDFLARE_BASE_DIR" "$(cf_site_dir "$user")" || true
+    if ! cloudflare_cert_existe; then
+        echo "Cloudflare nao autenticado no servidor para remover o tunnel remoto de ${user}."
+        return 1
+    fi
+
+    list_output="$(cloudflared tunnel list --output json 2>&1)" || {
+        echo "Falha ao listar tunnels do Cloudflare para ${user}: ${list_output:-sem detalhes}"
+        return 1
+    }
+
+    if command -v jq >/dev/null 2>&1; then
+        tunnel_id="$(cf_tunnel_id_por_nome_json "$user" "$list_output")"
+    else
+        tunnel_id="$(cloudflared tunnel list 2>/dev/null | awk -v name="$user" '$2 == name {print $1; exit}')"
+    fi
+
+    if [[ -z "$tunnel_id" ]]; then
+        return 0
+    fi
+
+    delete_output="$(cloudflared tunnel delete "$tunnel_id" -f 2>&1)" || {
+        echo "Falha ao remover tunnel Cloudflare ${user} (${tunnel_id}): ${delete_output:-sem detalhes}"
+        return 1
+    }
+
+    list_output="$(cloudflared tunnel list --output json 2>&1)" || {
+        echo "Tunnel ${user} removido, mas nao foi possivel validar no Cloudflare: ${list_output:-sem detalhes}"
+        return 1
+    }
+
+    if command -v jq >/dev/null 2>&1; then
+        tunnel_id="$(cf_tunnel_id_por_nome_json "$user" "$list_output")"
+    else
+        tunnel_id="$(cloudflared tunnel list 2>/dev/null | awk -v name="$user" '$2 == name {print $1; exit}')"
+    fi
+
+    if [[ -n "$tunnel_id" ]]; then
+        echo "Tunnel Cloudflare ${user} (${tunnel_id}) ainda existe apos a tentativa de remocao."
+        return 1
+    fi
 }
 
 cloudflare_login_log_file() {
@@ -3593,6 +3663,8 @@ api_limpar_residuos_site_por_dominio() {
     fi
 
     local users_tmp before_tmp after_tmp users_json before_json after_json
+    local possui_restos cleanup_failed_bool error_message warning_message
+    local cleanup_errors=""
     users_tmp="$(mktemp)"
     before_tmp="$(mktemp)"
     after_tmp="$(mktemp)"
@@ -3616,10 +3688,37 @@ api_limpar_residuos_site_por_dominio() {
         [[ -n "$user" ]] || continue
         if ! limpar_residuos_site_total "$user"; then
             cleanup_failed="1"
+            if [[ -n "$ULTIMO_ERRO_LIMPEZA_RESIDUOS" ]]; then
+                if [[ -z "$cleanup_errors" ]]; then
+                    cleanup_errors="${user}: ${ULTIMO_ERRO_LIMPEZA_RESIDUOS}"
+                else
+                    cleanup_errors="${cleanup_errors}; ${user}: ${ULTIMO_ERRO_LIMPEZA_RESIDUOS}"
+                fi
+            fi
         fi
     done < "$users_tmp"
 
     listar_residuos_dominio "$dominio" > "$after_tmp"
+
+    possui_restos="0"
+    [[ -s "$after_tmp" ]] && possui_restos="1"
+
+    cleanup_failed_bool="false"
+    [[ "$cleanup_failed" == "1" ]] && cleanup_failed_bool="true"
+
+    error_message=""
+    warning_message=""
+    if [[ "$possui_restos" == "1" ]]; then
+        error_message="Ainda restam residuos apos a limpeza. Rode a verificacao novamente e revise os itens restantes."
+        if [[ -n "$cleanup_errors" ]]; then
+            error_message="${error_message} Detalhes: ${cleanup_errors}"
+        fi
+    elif [[ "$cleanup_failed" == "1" ]]; then
+        warning_message="A limpeza concluiu apos nova verificacao. Alguns passos falharam na primeira tentativa, mas nenhum residuo restou ao final."
+        if [[ -n "$cleanup_errors" ]]; then
+            warning_message="${warning_message} Detalhes: ${cleanup_errors}"
+        fi
+    fi
 
     if command -v jq >/dev/null 2>&1; then
         users_json="$(jq -R -s 'split("\n") | map(select(length > 0))' "$users_tmp")"
@@ -3630,18 +3729,17 @@ api_limpar_residuos_site_por_dominio() {
             --argjson users "$users_json" \
             --argjson residues "$before_json" \
             --argjson remaining "$after_json" \
-            --argjson cleanup_failed "$cleanup_failed" \
-            '{ok:(($remaining | length) == 0 and $cleanup_failed == 0),domain:$domain,users:$users,residues:$residues,remaining:$remaining,cleanup_failed:($cleanup_failed == 1)}'
+            --argjson cleanup_failed "$cleanup_failed_bool" \
+            --arg error "$error_message" \
+            --arg warning "$warning_message" \
+            '{ok:(($remaining | length) == 0),domain:$domain,users:$users,residues:$residues,remaining:$remaining,cleanup_failed:$cleanup_failed,error:$error,warning:$warning}'
     else
         echo "{\"ok\":false,\"domain\":\"${dominio}\"}"
     fi
 
-    local possui_restos="0"
-    [[ -s "$after_tmp" ]] && possui_restos="1"
-
     rm -f "$users_tmp" "$before_tmp" "$after_tmp"
 
-    [[ "$cleanup_failed" == "0" && "$possui_restos" == "0" ]]
+    [[ "$possui_restos" == "0" ]]
 }
 
 api_cron_listar() {

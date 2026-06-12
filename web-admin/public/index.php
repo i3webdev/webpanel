@@ -1112,6 +1112,7 @@ try {
             $residueItems = isset($payload['residues']) && is_array($payload['residues']) ? array_values($payload['residues']) : [];
             $remainingItems = isset($payload['remaining']) && is_array($payload['remaining']) ? array_values($payload['remaining']) : [];
             $candidateUsers = isset($payload['users']) && is_array($payload['users']) ? array_values($payload['users']) : [];
+            $warning = trim((string) ($payload['warning'] ?? ''));
             $details = [];
             foreach ($candidateUsers as $candidateUser) {
                 $candidateUser = trim((string) $candidateUser);
@@ -1131,6 +1132,9 @@ try {
                     $details[] = 'Restante: ' . $item;
                 }
             }
+            if ($warning !== '') {
+                $details[] = 'Observacao: ' . $warning;
+            }
 
             if ($code === 0 && ($payload['ok'] ?? false) === true) {
                 $actionResult = [
@@ -1140,7 +1144,13 @@ try {
                     'details' => $details,
                 ];
             } else {
-                $detail = (string) ($payload['error'] ?? ($stderr !== '' ? $stderr : 'falha desconhecida'));
+                $detail = trim((string) ($payload['error'] ?? ''));
+                if ($detail === '' && $remainingItems === []) {
+                    $detail = 'A limpeza executou, mas a validacao final retornou estado inconsistente. Rode a verificacao de residuos novamente.';
+                }
+                if ($detail === '') {
+                    $detail = $stderr !== '' ? $stderr : 'falha desconhecida';
+                }
                 $actionResult = [
                     'type' => 'error',
                     'title' => 'Falha na limpeza de residuos',
