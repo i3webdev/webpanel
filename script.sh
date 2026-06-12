@@ -2280,7 +2280,7 @@ remover_tunnel_site() {
         return 0
     fi
 
-    delete_output="$(cloudflared tunnel delete "$tunnel_id" -f 2>&1)" || {
+    delete_output="$(cloudflared tunnel delete -f "$tunnel_id" 2>&1)" || {
         echo "Falha ao remover tunnel Cloudflare ${user} (${tunnel_id}): ${delete_output:-sem detalhes}"
         return 1
     }
