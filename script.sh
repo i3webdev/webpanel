@@ -1770,7 +1770,11 @@ detectar_residuos_site() {
         fi
     done < <(listar_residuos_site "$user" "$root_dir")
 
-    [[ -n "$resumo" ]] && echo "$resumo"
+    if [[ -n "$resumo" ]]; then
+        echo "$resumo"
+    fi
+
+    return 0
 }
 
 usuario_protegido_limpeza_residuos() {
@@ -1918,7 +1922,11 @@ detectar_residuos_dominio() {
         fi
     done < <(listar_residuos_dominio "$dominio")
 
-    [[ -n "$resumo" ]] && echo "$resumo"
+    if [[ -n "$resumo" ]]; then
+        echo "$resumo"
+    fi
+
+    return 0
 }
 
 limpar_residuos_site_total() {
